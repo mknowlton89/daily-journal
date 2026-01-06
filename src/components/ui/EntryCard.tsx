@@ -1,41 +1,62 @@
 "use client";
 
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "./card";
-import { Label } from "./label";
-import { Textarea } from "./textarea";
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./card";
+import { useEditor, EditorContent } from "@tiptap/react";
+import Emoji from "@tiptap/extension-emoji";
+import { TaskItem, TaskList } from "@tiptap/extension-list";
+import { BulletList, ListItem } from "@tiptap/extension-list";
+import Paragraph from "@tiptap/extension-paragraph";
+import Text from "@tiptap/extension-text";
+import HorizontalRule from "@tiptap/extension-horizontal-rule";
+import Strike from "@tiptap/extension-strike";
+import Document from "@tiptap/extension-document";
 import { useState } from "react";
 import { Button } from "./button";
+import { useRouter } from "next/navigation";
 
 export default function EntryCard() {
-  const [entryValue, setEntryValue] = useState({
-    content: "",
-  });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  const editor = useEditor({
+    extensions: [
+      Document,
+      Paragraph,
+      Text,
+      BulletList,
+      ListItem,
+      Emoji,
+      HorizontalRule,
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+      Strike,
+    ],
+    autofocus: true,
+    content: "",
+    immediatelyRender: false,
+  });
 
   const handleSubmit = async () => {
+    if (!editor) return;
+
     setLoading(true);
-    setError(null);
     try {
-      const payload: { userId: string; content: string } = {
-        userId: "1", // Hardcoded for MVP
-        content: entryValue.content,
+      const payload: { content: string } = {
+        content: editor.getText(), // We'll probably need to update to support more complex content
       };
       const res = await fetch("/api/auth/entries", {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
-      console.log(res);
+      editor.commands.clearContent();
+      router.push(`/`);
     } catch (error) {
       console.error(error);
-      setError("Something went wrong");
     } finally {
       setLoading(false);
     }
@@ -48,13 +69,13 @@ export default function EntryCard() {
           <CardTitle>What&apos;s on your mind?</CardTitle>
         </CardHeader>
         <CardContent>
-          <form>
-            <Textarea
-              className="min-h-[200px]"
-              value={entryValue.content}
-              onChange={(e) => setEntryValue({ content: e.target.value })}
-            />
-          </form>
+          {!editor ? (
+            <div>Loading...</div>
+          ) : (
+            <div>
+              <EditorContent editor={editor} className="min-h-[200px]" />
+            </div>
+          )}
         </CardContent>
         <CardFooter className="flex-col gap-2">
           <Button

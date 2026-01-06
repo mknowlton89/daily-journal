@@ -2,7 +2,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
-import LogoutButton from "@/components/ui/LogoutButton";
 import ProtectedPage from "@/components/ui/AuthProvider";
 
 const geistSans = Geist({
@@ -26,10 +25,7 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         <SessionProvider>
-          <ProtectedPage>
-            {/* <LogoutButton /> */}
-            {children}
-          </ProtectedPage>
+          <ProtectedPage>{children}</ProtectedPage>
         </SessionProvider>
       </body>
     </html>
