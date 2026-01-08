@@ -15,9 +15,8 @@ const EntrySchema = new mongoose.Schema({
 
 const Entry = mongoose.models.Entry || mongoose.model("Entry", EntrySchema);
 
-// MVP Test
-export function getAllEntries() {
-  return Entry.find();
+export function getAllEntries(userId: string) {
+  return Entry.find({ userId });
 }
 
 export function createEntry(
@@ -29,4 +28,8 @@ export function createEntry(
     dateUpdated: new Date(),
     ...entry,
   });
+}
+
+export function getEntryById(id: string, userId: string) {
+  return Entry.findOne({ id, userId });
 }

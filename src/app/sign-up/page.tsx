@@ -42,7 +42,6 @@ export default function SignUpPage() {
         throw new Error("Failed to create user");
       }
       const userData = await user.json();
-      console.log(userData);
     } catch (error) {
       console.error(error);
     } finally {
