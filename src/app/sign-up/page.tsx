@@ -13,8 +13,11 @@ import { Label } from "@/components/ui/label";
 import Link from "next/link";
 import { useState } from "react";
 import { UserInterface } from "../lib/types/users";
+import { Separator } from "@/components/ui/separator";
+import { useRouter } from "next/navigation";
 
 export default function SignUpPage() {
+  const router = useRouter();
   const [formData, setFormData] = useState<
     Omit<UserInterface, "id" | "dateCreated" | "dateUpdated"> & {
       confirmPassword: string;
@@ -25,25 +28,28 @@ export default function SignUpPage() {
     password: "",
     confirmPassword: "",
   });
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async () => {
-    // e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
-      const user = await fetch("/api/auth/signup", {
+      const res = await fetch("/api/auth/signup", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(formData),
       });
-      if (!user.ok) {
-        throw new Error("Failed to create user");
+
+      if (res.ok) {
+        router.push("/");
+      } else {
+        setError("Failed to create user");
       }
-      const userData = await user.json();
     } catch (error) {
-      console.error(error);
+      console.error("Error creating user:", error);
     } finally {
       setLoading(false);
     }
@@ -53,10 +59,9 @@ export default function SignUpPage() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Create an account</CardTitle>
-          <CardDescription>
-            Already have an account? <Link href="/login">Login instead</Link>
-          </CardDescription>
+          <CardTitle className="text-center text-2xl">
+            Create Your Account
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit}>
@@ -121,18 +126,26 @@ export default function SignUpPage() {
                   }
                 />
               </div>
+              {error && <span className="text-red-500 text-sm">{error}</span>}
+              <Button
+                type="submit"
+                className="w-full"
+                onClick={async () => await handleSubmit()}
+                disabled={loading}
+              >
+                Start Journaling!
+              </Button>
             </div>
           </form>
         </CardContent>
         <CardFooter className="flex-col gap-2">
-          <Button
-            type="submit"
-            className="w-full"
-            onClick={async () => await handleSubmit()}
-            disabled={loading}
-          >
-            Start Journaling!
-          </Button>
+          <Separator className="my-2" />
+          <span className="text-sm text-gray-600">
+            Already have an account?{" "}
+            <Link href="/login" className="font-bold underline">
+              Login
+            </Link>
+          </span>
         </CardFooter>
       </Card>
     </div>
