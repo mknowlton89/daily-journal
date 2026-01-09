@@ -2,9 +2,7 @@
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardAction,
   CardContent,
-  CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
@@ -13,7 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, SignInResponse } from "next-auth/react";
+import Link from "next/link";
+import { Separator } from "@/components/ui/separator";
 
 export default function LoginPage() {
   const [formData, setFormData] = useState<{ email: string; password: string }>(
@@ -28,8 +28,9 @@ export default function LoginPage() {
 
   const handleSubmit = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await signIn("credentials", {
+      const res: SignInResponse | undefined = await signIn("credentials", {
         redirect: false,
         email: formData.email,
         password: formData.password,
@@ -37,11 +38,14 @@ export default function LoginPage() {
       if (res?.ok) {
         router.push("/");
       } else if (res?.status === 401) {
-        setError("Invalid Credentials");
+        setError("Invalid Credentials.");
       }
     } catch (error) {
-      console.error(error);
-      setError("Something went wrong");
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
     } finally {
       setLoading(false);
     }
@@ -51,15 +55,10 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Login to your account</CardTitle>
-          <CardDescription>
-            Enter your email below to login to your account
-          </CardDescription>
-          <CardAction>
-            <Button variant="link" onClick={() => router.push("/sign-up")}>
-              Sign Up
-            </Button>
-          </CardAction>
+          <CardTitle className="text-center text-2xl">Login</CardTitle>
+          <span className="text-center text-sm text-gray-800">
+            Enter your details below to login
+          </span>
         </CardHeader>
         <CardContent>
           <form>
@@ -69,25 +68,20 @@ export default function LoginPage() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="m@example.com"
+                  placeholder="mindfulmandy@gmail.com"
                   required
                   autoFocus
                   disabled={loading}
                   value={formData.email}
-                  onChange={(e) =>
-                    setFormData({ ...formData, email: e.target.value })
-                  }
+                  onChange={(e) => {
+                    if (error) setError(null);
+                    setFormData({ ...formData, email: e.target.value });
+                  }}
                 />
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center">
                   <Label htmlFor="password">Password</Label>
-                  <a
-                    href="#"
-                    className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
-                  >
-                    Forgot your password?
-                  </a>
                 </div>
                 <Input
                   id="password"
@@ -95,23 +89,32 @@ export default function LoginPage() {
                   required
                   disabled={loading}
                   value={formData.password}
-                  onChange={(e) =>
-                    setFormData({ ...formData, password: e.target.value })
-                  }
+                  onChange={(e) => {
+                    if (error) setError(null);
+                    setFormData({ ...formData, password: e.target.value });
+                  }}
                 />
               </div>
+              {error && <span className="text-red-500 text-sm">{error}</span>}
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading}
+                onClick={async () => await handleSubmit()}
+              >
+                Login
+              </Button>
             </div>
           </form>
         </CardContent>
         <CardFooter className="flex-col gap-2">
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={loading}
-            onClick={async () => await handleSubmit()}
-          >
-            Login
-          </Button>
+          <Separator className="my-2" />
+          <span className="text-sm text-gray-600">
+            Don&apos;t have an account yet?{" "}
+            <Link href="/sign-up" className="font-bold underline">
+              Sign up
+            </Link>
+          </span>
         </CardFooter>
       </Card>
     </div>

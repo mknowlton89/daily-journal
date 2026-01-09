@@ -8,7 +8,7 @@ import { useRouter } from "next/navigation";
 
 export default function Home() {
   const router = useRouter();
-  const { data, error, isLoading, mutate } =
+  const { data, error, isLoading } =
     useApi<EntryInterface[]>("/api/auth/entries");
 
   if (isLoading) {
@@ -46,7 +46,9 @@ export default function Home() {
                 </div>
               </CardTitle>
             </CardHeader>
-            <CardContent>{entry.content}</CardContent>
+            <CardContent>
+              This is where we should show a preview of the entry somehow.
+            </CardContent>
           </Card>
         );
       })}
