@@ -26,18 +26,20 @@ export default function ProtectedPage({
   }
   return (
     <>
-      <div className="flex justify-between w-full p-4 border-b">
-        <div className="font-bold">
-          <Link href="/">JRNL</Link>
+      {session.status === "authenticated" && (
+        <div className="flex justify-between w-full p-4 border-b">
+          <div className="font-bold">
+            <Link href="/">JRNL</Link>
+          </div>
+          <div className="flex align-center gap-2">
+            <Button onClick={async () => await handleNewEntry()}>
+              <PlusIcon className="w-4 h-4" />
+              New Entry
+            </Button>
+            <LogoutButton />
+          </div>
         </div>
-        <div className="flex align-center gap-2">
-          <Button onClick={async () => await handleNewEntry()}>
-            <PlusIcon className="w-4 h-4" />
-            New Entry
-          </Button>
-          <LogoutButton />
-        </div>
-      </div>
+      )}
       <div className="p-6">{children}</div>
     </>
   );
