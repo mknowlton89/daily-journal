@@ -44,3 +44,7 @@ export function updateEntry(id: string, userId: string, content: JSONContent) {
     { $set: { content, dateUpdated: new Date() } }
   );
 }
+
+export function deleteEntry(id: string, userId: string) {
+  return Entry.deleteOne({ id, userId });
+}
