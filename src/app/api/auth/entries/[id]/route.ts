@@ -1,5 +1,9 @@
 import type { Session } from "next-auth";
-import { getEntryById, updateEntry } from "@/app/lib/models/EntryModel";
+import {
+  deleteEntry,
+  getEntryById,
+  updateEntry,
+} from "@/app/lib/models/EntryModel";
 import { withAuthAndDB } from "@/lib/with-auth-and-db";
 
 export const GET = withAuthAndDB(
@@ -38,5 +42,21 @@ export const PUT = withAuthAndDB(
     const body = await request.json();
     const entry = await updateEntry(id, userId, body.content);
     return Response.json(entry, { status: 200 });
+  }
+);
+
+export const DELETE = withAuthAndDB(
+  async (
+    session: Session,
+    _request: Request,
+    params: Promise<{ [key: string]: string }>
+  ) => {
+    const { id } = await params;
+    const userId = session?.user?.userId;
+    if (!userId) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    await deleteEntry(id, userId);
+    return Response.json({ status: 204 });
   }
 );

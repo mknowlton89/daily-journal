@@ -6,6 +6,12 @@ import Emoji from "@tiptap/extension-emoji";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
+import { Button } from "./button";
+import Link from "next/link";
+
+import { FaArrowLeft, FaTrash } from "react-icons/fa6";
+import { Badge } from "./badge";
+import { useRouter } from "next/navigation";
 
 export default function EntryCard({
   entryId,
@@ -16,6 +22,7 @@ export default function EntryCard({
   content?: JSONContent;
   dateUpdated: number;
 }) {
+  const router = useRouter();
   const [lastSavedAt, setLastSavedAt] = useState<number>(dateUpdated);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedAtRef = useRef<number>(dateUpdated);
@@ -54,6 +61,15 @@ export default function EntryCard({
     }, 1000);
   };
 
+  const handleDelete = async () => {
+    const res = await fetch(`/api/auth/entries/${entryId}`, {
+      method: "DELETE",
+    });
+    if (res.ok) {
+      router.push("/");
+    }
+  };
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -82,19 +98,38 @@ export default function EntryCard({
   return (
     <div className="w-full">
       {!editor ? (
-        <div>Loading...</div>
+        <div className="flex items-center justify-center h-full">
+          Loading...
+        </div>
       ) : (
         <div>
-          <div className="flex justify-end pb-4">
-            <span className="font-light text-sm color-gray-500">
-              {/* MKTODO: I need to update this so it shows a relative time like "Last saved 10 minutes ago", but if its greater than 1 hour, it shows the full date and time. */}
-              {lastSavedAt
-                ? `Last updated: ${new Date(lastSavedAt).toLocaleString()}`
-                : "No updates yet"}
-              {/* It feels like we should probably have an error state here if the update does fail. */}
-            </span>
+          <div className="flex justify-between items-center w-full p-4 border-b">
+            <div>
+              <Link href="/">
+                <div className="flex items-center justify-center gap-2">
+                  <FaArrowLeft size={16} />
+                  <span>Exit Editor</span>
+                </div>
+              </Link>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">
+                {lastSavedAt
+                  ? `Last updated: ${new Date(lastSavedAt).toLocaleString()}`
+                  : "No updates yet"}
+              </Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleDelete()}
+              >
+                <FaTrash size={16} className="text-red-400" />
+              </Button>
+            </div>
           </div>
-          <EditorContent editor={editor} className="min-h-[200px]" />
+          <div className="p-6">
+            <EditorContent editor={editor} className="min-h-[200px]" />
+          </div>
         </div>
       )}
     </div>
