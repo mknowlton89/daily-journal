@@ -21,6 +21,7 @@ export default function EntryPage() {
           <div>Error: {error.message}</div>
         ) : (
           <EntryCard
+            key={id}
             entryId={id}
             content={data?.content}
             dateUpdated={

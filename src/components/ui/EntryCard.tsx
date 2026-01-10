@@ -1,17 +1,11 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { JSONContent, useEditor, EditorContent } from "@tiptap/react";
 import Emoji from "@tiptap/extension-emoji";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
-import { BulletList, ListItem } from "@tiptap/extension-list";
-import Paragraph from "@tiptap/extension-paragraph";
 import StarterKit from "@tiptap/starter-kit";
-import Text from "@tiptap/extension-text";
-import HorizontalRule from "@tiptap/extension-horizontal-rule";
-import Strike from "@tiptap/extension-strike";
-import Document from "@tiptap/extension-document";
 import Placeholder from "@tiptap/extension-placeholder";
-import { useRef, useState } from "react";
 
 export default function EntryCard({
   entryId,
@@ -62,14 +56,8 @@ export default function EntryCard({
 
   const editor = useEditor({
     extensions: [
-      Document,
-      Paragraph,
-      Text,
-      BulletList,
-      ListItem,
       StarterKit,
       Emoji,
-      HorizontalRule,
       TaskList,
       Placeholder.configure({
         placeholder: ({ node }) => {
@@ -82,29 +70,17 @@ export default function EntryCard({
       TaskItem.configure({
         nested: true,
       }),
-      Strike,
     ],
-    autofocus: true,
+    autofocus: false,
     immediatelyRender: false,
     onUpdate: ({ editor }) => {
       scheduleSave(editor.getJSON());
     },
-    content:
-      content && content.content && content.content.length > 0
-        ? content
-        : {
-            type: "doc",
-            content: [
-              {
-                type: "heading",
-                attrs: { level: 1 },
-              },
-            ],
-          },
+    content: content || undefined, // Let TipTap create default empty content if no content
   });
 
   return (
-    <div className="p-4 w-4/5">
+    <div className="w-full">
       {!editor ? (
         <div>Loading...</div>
       ) : (
