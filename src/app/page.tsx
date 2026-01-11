@@ -1,15 +1,25 @@
 "use client";
 
-import { useApi } from "@/lib/hooks/useApi";
+import { postApi, useApi } from "@/lib/hooks/useApi";
 import { EntryInterface } from "./lib/types/Entry/entries";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarIcon, EditIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
 
 export default function Home() {
   const router = useRouter();
   const { data, error, isLoading } =
     useApi<EntryInterface[]>("/api/auth/entries");
+
+  async function handleNewEntry() {
+    try {
+      const { data } = await postApi<EntryInterface>("/api/auth/entries", {});
+      router.push(`/entries/${data.id}`);
+    } catch (error) {
+      console.error("Failed to create entry:", error);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -29,6 +39,13 @@ export default function Home() {
 
   return (
     <div className="flex flex-col items-center justify-start min-h-screen gap-4 w-full">
+      <Button
+        onClick={async () => await handleNewEntry()}
+        className="rounded-full"
+        size="sm"
+      >
+        Add Entry
+      </Button>
       {data.map((entry) => {
         return (
           <Card key={entry.id} className="w-full">
