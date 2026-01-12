@@ -2,6 +2,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { SessionProvider } from "next-auth/react";
+import { Provider as ThemeProvider } from "@/components/providers/ThemeProvider";
 import ProtectedPage from "@/components/ui/ProtectedPage";
 
 const geistSans = Geist({
@@ -20,13 +21,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <SessionProvider>
-          <ProtectedPage>{children}</ProtectedPage>
-        </SessionProvider>
+        <ThemeProvider>
+          <SessionProvider>
+            <ProtectedPage>{children}</ProtectedPage>
+          </SessionProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

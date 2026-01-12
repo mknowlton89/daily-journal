@@ -204,7 +204,7 @@ export default function EntryCard({
           </div>
           <div className="p-6">
             <div className="flex items-center justify-center mb-6 ">
-              <div className="flex items-center justify-center rounded drop-shadow-sm bg-gray-50 gap-2">
+              <div className="flex items-center justify-center rounded drop-shadow-sm bg-gray-50 dark:bg-neutral-800 gap-2">
                 <div>
                   <Select
                     value={getCurrentTextStyle()}
@@ -239,6 +239,11 @@ export default function EntryCard({
                     variant="ghost"
                     size="icon"
                     onClick={() => editor.chain().focus().toggleBold().run()}
+                    className={
+                      editor.isActive("bold")
+                        ? "bg-gray-200 dark:bg-neutral-700"
+                        : ""
+                    }
                   >
                     <FaBold size={16} />
                   </Button>
@@ -246,6 +251,11 @@ export default function EntryCard({
                     variant="ghost"
                     size="icon"
                     onClick={() => editor.chain().focus().toggleItalic().run()}
+                    className={
+                      editor.isActive("italic")
+                        ? "bg-gray-200 dark:bg-neutral-700"
+                        : ""
+                    }
                   >
                     <FaItalic size={16} />
                   </Button>
@@ -255,6 +265,11 @@ export default function EntryCard({
                     onClick={() =>
                       editor.chain().focus().toggleUnderline().run()
                     }
+                    className={
+                      editor.isActive("underline")
+                        ? "bg-gray-200 dark:bg-neutral-700"
+                        : ""
+                    }
                   >
                     <FaUnderline size={16} />
                   </Button>
@@ -262,6 +277,11 @@ export default function EntryCard({
                     variant="ghost"
                     size="icon"
                     onClick={() => editor.chain().focus().toggleStrike().run()}
+                    className={
+                      editor.isActive("strike")
+                        ? "bg-gray-200 dark:bg-neutral-700"
+                        : ""
+                    }
                   >
                     <FaStrikethrough size={16} />
                   </Button>

@@ -1,12 +1,20 @@
-import { useSession } from "next-auth/react";
-import LogoutButton from "./LogoutButton";
+import { signOut, useSession } from "next-auth/react";
 import Link from "next/link";
-import { Button } from "./button";
-import { PlusIcon } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuPortal,
+  DropdownMenuSubContent,
+} from "./dropdown-menu";
 import { usePathname, useRouter } from "next/navigation";
-import { postApi } from "@/lib/hooks/useApi";
-import { EntryInterface } from "@/app/lib/types/Entry/entries";
 import { cn } from "@/lib/utils";
+import { FaBars } from "react-icons/fa6";
+import { useTheme } from "next-themes";
 
 export default function ProtectedPage({
   children,
@@ -14,35 +22,66 @@ export default function ProtectedPage({
   children: React.ReactNode;
 }>) {
   const router = useRouter();
+  const { theme, setTheme } = useTheme();
   const pathname = usePathname();
   const isEntryPage = pathname.includes("/entries/");
   const session = useSession();
   if (!session) return null;
 
-  async function handleNewEntry() {
-    try {
-      const { data } = await postApi<EntryInterface>("/api/auth/entries", {});
-      router.push(`/entries/${data.id}`);
-    } catch (error) {
-      console.error("Failed to create entry:", error);
-    }
-  }
   return (
     <>
+      {/* MKTODO: Convert to a component to make the code easier to read*/}
       {session.status === "authenticated" && !isEntryPage && (
         <div className="flex justify-between w-full p-4 border-b items-center">
           <div className="font-bold">
             <Link href="/">JRNL</Link>
           </div>
           <div className="flex align-center gap-2">
-            <Button
-              onClick={async () => await handleNewEntry()}
-              className="rounded-full"
-              size="sm"
-            >
-              <PlusIcon className="w-4 h-4" />
-            </Button>
-            <LogoutButton />
+            <DropdownMenu>
+              <DropdownMenuTrigger>
+                <span role="button" className="cursor-pointer">
+                  <FaBars size={24} />
+                </span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Choose theme</DropdownMenuSubTrigger>
+                  <DropdownMenuPortal>
+                    <DropdownMenuSubContent>
+                      <DropdownMenuCheckboxItem
+                        checked={theme === "light"}
+                        onCheckedChange={() => setTheme("light")}
+                      >
+                        Light mode
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={theme === "dark"}
+                        onCheckedChange={() => setTheme("dark")}
+                      >
+                        Dark mode
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem
+                        checked={theme === "system"}
+                        onCheckedChange={() => setTheme("system")}
+                      >
+                        System mode
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuPortal>
+                </DropdownMenuSub>
+                <DropdownMenuItem
+                  className="text-red-500"
+                  onClick={async () => {
+                    await signOut({
+                      redirect: false,
+                    });
+                    router.push("/login");
+                  }}
+                >
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       )}
