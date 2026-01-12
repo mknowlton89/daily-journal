@@ -11,7 +11,6 @@ import {
   DropdownMenuPortal,
   DropdownMenuSubContent,
 } from "./dropdown-menu";
-import { Button } from "./button";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { FaBars } from "react-icons/fa6";
@@ -40,9 +39,9 @@ export default function ProtectedPage({
           <div className="flex align-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger>
-                <Button variant="ghost" size="icon">
-                  <FaBars size={16} />
-                </Button>
+                <span role="button" className="cursor-pointer">
+                  <FaBars size={24} />
+                </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
                 <DropdownMenuSub>
