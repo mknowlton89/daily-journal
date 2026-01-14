@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { JSONContent, useEditor, EditorContent } from "@tiptap/react";
 import Emoji from "@tiptap/extension-emoji";
 import {
@@ -14,7 +14,6 @@ import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
 import { Button } from "./button";
-import Link from "next/link";
 
 import {
   FaArrowLeft,
@@ -26,6 +25,7 @@ import {
 } from "react-icons/fa6";
 import { Badge } from "./badge";
 import { useRouter } from "next/navigation";
+import { mutate } from "swr";
 import {
   Select,
   SelectContent,
@@ -51,29 +51,35 @@ export default function EntryCard({
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedAtRef = useRef<number>(dateUpdated);
 
-  const handleSave = async (content: JSONContent) => {
-    const now = Date.now();
+  const handleSave = useCallback(
+    async (content: JSONContent) => {
+      const now = Date.now();
 
-    // prevent double-saving
-    if (now - lastSavedAtRef.current < 500) return;
+      // prevent double-saving
+      if (now - lastSavedAtRef.current < 500) return;
 
-    try {
-      const res = await fetch(`/api/auth/entries/${entryId}`, {
-        method: "PUT",
-        body: JSON.stringify({ content }),
-      });
+      try {
+        console.log("Saving entry", content);
+        const res = await fetch(`/api/auth/entries/${entryId}`, {
+          method: "PUT",
+          body: JSON.stringify({ content }),
+        });
 
-      if (res.ok) {
-        // Only update timestamp on successful save
-        lastSavedAtRef.current = now;
-        setLastSavedAt(now);
-      } else {
-        console.error("Failed to save entry");
+        if (res.ok) {
+          // Only update timestamp on successful save
+          lastSavedAtRef.current = now;
+          setLastSavedAt(now);
+          // Invalidate SWR cache so the entry page will refetch fresh data
+          mutate(`/api/auth/entries/${entryId}`);
+        } else {
+          console.error("Failed to save entry");
+        }
+      } catch (error) {
+        console.error("Error saving entry:", error);
       }
-    } catch (error) {
-      console.error("Error saving entry:", error);
-    }
-  };
+    },
+    [entryId]
+  );
 
   const scheduleSave = (content: JSONContent) => {
     if (saveTimeoutRef.current) {
@@ -85,7 +91,27 @@ export default function EntryCard({
     }, 1000);
   };
 
+  const flushSave = async () => {
+    // Clear any pending save
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
+    // Save immediately if editor exists
+    if (editor) {
+      await handleSave(editor.getJSON());
+    }
+  };
+
+  const handleExitEditor = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    await flushSave();
+    router.push("/");
+  };
+
   const handleDelete = async () => {
+    console.log("Deleting entry", entryId);
     const res = await fetch(`/api/auth/entries/${entryId}`, {
       method: "DELETE",
     });
@@ -136,6 +162,11 @@ export default function EntryCard({
   const editor = useEditor({
     extensions: [
       StarterKit,
+      BulletList.configure({
+        HTMLAttributes: {
+          class: "list-disc",
+        },
+      }),
       Emoji,
       TaskList,
       OrderedList,
@@ -180,12 +211,13 @@ export default function EntryCard({
         <div>
           <div className="flex justify-between items-center w-full p-4 border-b">
             <div>
-              <Link href="/">
-                <div className="flex items-center justify-center gap-2">
-                  <FaArrowLeft size={16} />
-                  <span>Exit Editor</span>
-                </div>
-              </Link>
+              <button
+                onClick={handleExitEditor}
+                className="flex items-center gap-2"
+              >
+                <FaArrowLeft size={16} />
+                <span className="text-left">Exit Editor</span>
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="secondary">
@@ -203,7 +235,7 @@ export default function EntryCard({
             </div>
           </div>
           <div className="p-6">
-            <div className="flex items-center justify-center mb-6 ">
+            <div className="sticky top-0 z-10 flex items-center justify-center mb-6 py-4 -mx-6 px-6 bg-background/75 backdrop-blur-sm">
               <div className="flex items-center justify-center rounded drop-shadow-sm bg-gray-50 dark:bg-neutral-800 gap-2">
                 <div>
                   <Select
