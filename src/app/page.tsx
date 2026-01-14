@@ -42,7 +42,6 @@ export default function Home() {
       <Button
         onClick={async () => await handleNewEntry()}
         className="rounded-full"
-        size="sm"
       >
         Add Entry
       </Button>
