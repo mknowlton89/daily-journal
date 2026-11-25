@@ -2,12 +2,14 @@
 
 import { Extension } from "@tiptap/core";
 import type { Editor } from "@tiptap/react";
+import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type SlashCommand = {
   value: string;
   label: string;
   keywords: string;
+  description?: string;
 };
 
 export const SLASH_COMMANDS: SlashCommand[] = [
@@ -20,6 +22,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { value: "orderedList", label: "Ordered List", keywords: "ordered numbered list ol" },
   { value: "bulletList", label: "Bullet List", keywords: "bullet list ul" },
   { value: "codeBlock", label: "Code Block", keywords: "code codeblock" },
+  {
+    value: "prompt",
+    label: "Prompt",
+    description: "Insert a writing prompt",
+    keywords: "prompt idea question writing",
+  },
 ];
 
 export type SlashMatch = {
@@ -97,7 +105,7 @@ export function SlashMenu({
   return (
     <div
       role="listbox"
-      aria-label="Styles"
+      aria-label="Insert block"
       style={{ top, left }}
       className="fixed z-40 min-w-44 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]"
     >
@@ -114,11 +122,22 @@ export function SlashMenu({
             onMouseEnter={() => onHover(itemIndex)}
             onClick={() => onSelect(item.value)}
             className={cn(
-              "flex w-full cursor-pointer rounded-sm px-2 py-1.5 text-left text-sm",
+              "flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
               itemIndex === index && "bg-black/5 dark:bg-white/10"
             )}
           >
-            {item.label}
+            {item.value === "prompt" && (
+              <Sparkles
+                className="size-4 shrink-0 text-[#9a7340] dark:text-[#d4b483]"
+                aria-hidden="true"
+              />
+            )}
+            <span>
+              <span className="block">{item.label}</span>
+              {item.description && (
+                <span className="block text-xs text-[#8a847a]">{item.description}</span>
+              )}
+            </span>
           </button>
         ))
       )}
