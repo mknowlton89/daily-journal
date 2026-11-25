@@ -1,3 +1,7 @@
+"use client";
+
+import EntriesIndex from "@/components/journal/EntriesIndex";
+
 export default function EntriesPage() {
-  return <div>Entries Page</div>;
+  return <EntriesIndex />;
 }
