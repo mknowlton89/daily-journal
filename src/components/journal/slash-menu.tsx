@@ -55,13 +55,13 @@ export function readSlash(editor: Editor): SlashMatch | null {
   };
 }
 
-export function createSlashExtension(controller: {
-  current: {
-    onEnter: () => boolean;
-    onArrow: (delta: number) => boolean;
-    onEscape: () => boolean;
-  };
-}) {
+export type SlashController = {
+  onEnter: () => boolean;
+  onArrow: (delta: number) => boolean;
+  onEscape: () => boolean;
+};
+
+export function createSlashExtension(controller: { current: SlashController }) {
   return Extension.create({
     name: "slashCommand",
     priority: 1000,
