@@ -30,6 +30,7 @@ import {
   createSlashExtension,
   filterSlashCommands,
   readSlash,
+  type SlashController,
   type SlashMatch,
 } from "@/components/journal/slash-menu";
 import { exitCodeBlock } from "@/components/journal/exit-code-block";
@@ -109,9 +110,9 @@ const EntryCard = forwardRef<
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
   const slashMenuRef = useRef<SlashMenuState | null>(null);
   const dismissedSlashRef = useRef<number | null>(null);
-  const slashControllerRef = useRef({
+  const slashControllerRef = useRef<SlashController>({
     onEnter: () => false,
-    onArrow: (_delta: number) => false,
+    onArrow: () => false,
     onEscape: () => false,
   });
   const slashExtension = useRef(createSlashExtension(slashControllerRef)).current;
