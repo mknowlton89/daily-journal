@@ -1,6 +1,7 @@
 export type RichTextNode = {
   type?: string;
   text?: string;
+  attrs?: { text?: string };
   content?: RichTextNode[];
 };
 
@@ -21,6 +22,11 @@ export function extractPlainText(
   const chunks: string[] = [];
 
   const walk = (node: RichTextNode) => {
+    if (node.type === "journalPrompt") {
+      if (node.attrs?.text) chunks.push(node.attrs.text);
+      chunks.push("\n");
+      return;
+    }
     if (node.text) {
       chunks.push(node.text);
       return;

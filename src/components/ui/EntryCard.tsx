@@ -34,6 +34,12 @@ import {
   type SlashMatch,
 } from "@/components/journal/slash-menu";
 import { exitCodeBlock } from "@/components/journal/exit-code-block";
+import {
+  insertPromptFromSlash,
+  JournalPrompt,
+} from "@/components/journal/journal-prompt";
+import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
+import { promptForDate, promptPlaceholder } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
   flush: () => Promise<void>;
@@ -283,10 +289,14 @@ const EntryCard = forwardRef<
       Blockquote,
       Underline,
       Placeholder.configure({
-        placeholder: ({ node }) =>
-          node.type.name === "paragraph" ? "Press / to insert blocks" : "",
+        placeholder: ({ node, editor: current }) =>
+          promptPlaceholder({
+            nodeName: node.type.name,
+            entryIsEmpty: !extractPlainText(current.getJSON() as RichTextNode),
+          }),
         showOnlyCurrent: true,
       }),
+      JournalPrompt,
       slashExtension,
       exitCodeBlock,
     ],
@@ -368,6 +378,10 @@ const EntryCard = forwardRef<
     dismissedSlashRef.current = null;
     slashMenuRef.current = null;
     setSlashMenu(null);
+    if (value === "prompt") {
+      insertPromptFromSlash(editor, match, promptForDate(entryDate));
+      return;
+    }
     editor.chain().focus().deleteRange({ from: match.from, to: match.to }).run();
     handleTextStyleChange(value);
   };
