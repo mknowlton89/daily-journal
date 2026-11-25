@@ -24,14 +24,17 @@ export default function ProtectedPage({
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const pathname = usePathname();
-  const isEntryPage = pathname.includes("/entries/");
+  const isJournalRoute =
+    pathname === "/" ||
+    pathname.startsWith("/day") ||
+    pathname.startsWith("/entries");
   const session = useSession();
   if (!session) return null;
 
   return (
     <>
       {/* MKTODO: Convert to a component to make the code easier to read*/}
-      {session.status === "authenticated" && !isEntryPage && (
+      {session.status === "authenticated" && !isJournalRoute && (
         <div className="flex justify-between w-full p-4 border-b items-center">
           <div className="font-bold">
             <Link href="/">JRNL</Link>
@@ -85,7 +88,7 @@ export default function ProtectedPage({
           </div>
         </div>
       )}
-      <div className={cn("p-6", isEntryPage ? "p-0" : "")}>{children}</div>
+      <div className={cn(!isJournalRoute && "p-6")}>{children}</div>
     </>
   );
 }

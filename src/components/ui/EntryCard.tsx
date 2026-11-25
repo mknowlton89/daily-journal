@@ -1,10 +1,17 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { JSONContent, useEditor, EditorContent } from "@tiptap/react";
 import Emoji from "@tiptap/extension-emoji";
 import {
   BulletList,
+  ListItem,
   OrderedList,
   TaskItem,
   TaskList,
@@ -13,317 +20,526 @@ import Blockquote from "@tiptap/extension-blockquote";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
-import { Button } from "./button";
-
-import {
-  FaArrowLeft,
-  FaBold,
-  FaItalic,
-  FaStrikethrough,
-  FaTrash,
-  FaUnderline,
-} from "react-icons/fa6";
-import { Badge } from "./badge";
-import { useRouter } from "next/navigation";
+import { EntryInterface } from "@/app/lib/types/Entry/entries";
+import { postApi } from "@/lib/hooks/useApi";
 import { mutate } from "swr";
+import { cn } from "@/lib/utils";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "./select";
+  SlashMenu,
+  createSlashExtension,
+  filterSlashCommands,
+  readSlash,
+  type SlashMatch,
+} from "@/components/journal/slash-menu";
+import { exitCodeBlock } from "@/components/journal/exit-code-block";
 
-export default function EntryCard({
-  entryId,
-  content,
-  dateUpdated,
-}: {
-  entryId: string;
-  content?: JSONContent;
-  dateUpdated: number;
-}) {
-  const router = useRouter();
-  const [lastSavedAt, setLastSavedAt] = useState<number>(dateUpdated);
-  const [, setUpdateTrigger] = useState(0);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const lastSavedAtRef = useRef<number>(dateUpdated);
+export type EntryEditorHandle = {
+  flush: () => Promise<void>;
+};
 
-  const handleSave = useCallback(
-    async (content: JSONContent) => {
-      const now = Date.now();
+type SavedInfo = {
+  id: string;
+  savedAt: number;
+  content: JSONContent;
+};
 
-      // prevent double-saving
-      if (now - lastSavedAtRef.current < 500) return;
-
-      try {
-        console.log("Saving entry", content);
-        const res = await fetch(`/api/auth/entries/${entryId}`, {
-          method: "PUT",
-          body: JSON.stringify({ content }),
-        });
-
-        if (res.ok) {
-          // Only update timestamp on successful save
-          lastSavedAtRef.current = now;
-          setLastSavedAt(now);
-          // Invalidate SWR cache so the entry page will refetch fresh data
-          mutate(`/api/auth/entries/${entryId}`);
-        } else {
-          console.error("Failed to save entry");
-        }
-      } catch (error) {
-        console.error("Error saving entry:", error);
-      }
-    },
-    [entryId]
+function revalidateEntryList() {
+  return mutate(
+    (key) =>
+      typeof key === "string" &&
+      (key === "/api/auth/entries" || key.startsWith("/api/auth/entries?")),
+    undefined,
+    { revalidate: true }
   );
+}
 
-  const scheduleSave = (content: JSONContent) => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+const TEXT_STYLES = [
+  { value: "paragraph", label: "Paragraph" },
+  { value: "h1", label: "Heading 1" },
+  { value: "h2", label: "Heading 2" },
+  { value: "h3", label: "Heading 3" },
+  { value: "blockquote", label: "Blockquote" },
+  { value: "taskList", label: "Task List" },
+  { value: "orderedList", label: "Ordered List" },
+  { value: "bulletList", label: "Bullet List" },
+  { value: "codeBlock", label: "Code Block" },
+] as const;
 
-    saveTimeoutRef.current = setTimeout(() => {
-      handleSave(content);
-    }, 1000);
+type SlashMenuState = SlashMatch & {
+  index: number;
+  top: number;
+  left: number;
+};
+
+function slashPosition(
+  editor: NonNullable<ReturnType<typeof useEditor>>,
+  pos: number,
+  itemCount: number
+) {
+  const coords = editor.view.coordsAtPos(pos);
+  const menuHeight = Math.max(itemCount, 1) * 34 + 12;
+  const left = Math.max(8, Math.min(coords.left, window.innerWidth - 196));
+  const spaceBelow = window.innerHeight - coords.bottom;
+  if (spaceBelow < menuHeight + 80) {
+    return { top: Math.max(8, coords.top - menuHeight - 8), left };
+  }
+  return { top: coords.bottom + 8, left };
+}
+
+const EntryCard = forwardRef<
+  EntryEditorHandle,
+  {
+    entryId: string | null;
+    entryDate: string;
+    content?: JSONContent;
+    onSaved: (info: SavedInfo) => void;
+  }
+>(function EntryCard({ entryId, entryDate, content, onSaved }, ref) {
+  const [, setUpdateTrigger] = useState(0);
+  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+  const styleMenuRef = useRef<HTMLDivElement>(null);
+  const entryIdRef = useRef(entryId);
+  const onSavedRef = useRef(onSaved);
+  const revisionRef = useRef(0);
+  const savedRevisionRef = useRef(0);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null);
+  const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
+  const slashMenuRef = useRef<SlashMenuState | null>(null);
+  const dismissedSlashRef = useRef<number | null>(null);
+  const slashControllerRef = useRef({
+    onEnter: () => false,
+    onArrow: (_delta: number) => false,
+    onEscape: () => false,
+  });
+  const slashExtension = useRef(createSlashExtension(slashControllerRef)).current;
+
+  useEffect(() => {
+    entryIdRef.current = entryId;
+  }, [entryId]);
+
+  useEffect(() => {
+    onSavedRef.current = onSaved;
+  }, [onSaved]);
+
+  useEffect(() => {
+    if (!styleMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!styleMenuRef.current?.contains(event.target as Node)) {
+        setStyleMenuOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setStyleMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [styleMenuOpen]);
+
+  const enqueueSave = () => {
+    const run = async () => {
+      const editorInstance = editorRef.current;
+      if (!editorInstance) return;
+      const savingRevision = revisionRef.current;
+      if (savingRevision === savedRevisionRef.current) return;
+
+      const doc = editorInstance.getJSON();
+      try {
+        let id = entryIdRef.current;
+        if (!id) {
+          const created = await postApi<EntryInterface>("/api/auth/entries", {
+            entryDate,
+            content: doc,
+          });
+          id = created.data.id;
+          entryIdRef.current = id;
+        } else {
+          const res = await fetch(`/api/auth/entries/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: doc }),
+          });
+          if (!res.ok) throw new Error("Failed to save entry");
+        }
+
+        if (savedRevisionRef.current < savingRevision) {
+          savedRevisionRef.current = savingRevision;
+        }
+        onSavedRef.current({ id, savedAt: Date.now(), content: doc });
+        void revalidateEntryList();
+      } catch (error) {
+        console.error("Failed to save entry:", error);
+      }
+    };
+
+    queueRef.current = queueRef.current.then(run, run);
+    return queueRef.current;
   };
 
-  const flushSave = async () => {
-    // Clear any pending save
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
-    }
-
-    // Save immediately if editor exists
-    if (editor) {
-      await handleSave(editor.getJSON());
-    }
+  const scheduleSave = () => {
+    revisionRef.current += 1;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null;
+      void enqueueSave();
+    }, 800);
   };
 
-  const handleExitEditor = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    await flushSave();
-    router.push("/");
+  const scheduleRef = useRef(scheduleSave);
+  scheduleRef.current = scheduleSave;
+
+  const syncSlash = (current: NonNullable<ReturnType<typeof useEditor>>) => {
+    let match: SlashMatch | null = null;
+    try {
+      match = readSlash(current);
+    } catch {
+      match = null;
+    }
+
+    if (dismissedSlashRef.current != null) {
+      if (!match || match.from !== dismissedSlashRef.current) {
+        dismissedSlashRef.current = null;
+      } else {
+        slashMenuRef.current = null;
+        setSlashMenu((prev) => (prev === null ? prev : null));
+        return;
+      }
+    }
+
+    if (!match) {
+      slashMenuRef.current = null;
+      setSlashMenu((prev) => (prev === null ? prev : null));
+      return;
+    }
+
+    let index = 0;
+    const previous = slashMenuRef.current;
+    if (previous && previous.from === match.from && previous.query === match.query) {
+      index = previous.index;
+    }
+    const items = filterSlashCommands(match.query);
+    if (items.length) index = Math.min(index, items.length - 1);
+
+    let position = { top: 8, left: 8 };
+    try {
+      position = slashPosition(current, match.to, items.length || 1);
+    } catch {
+      position = { top: 8, left: 8 };
+    }
+
+    const next: SlashMenuState = { ...match, index, ...position };
+    if (
+      previous &&
+      previous.query === next.query &&
+      previous.from === next.from &&
+      previous.to === next.to &&
+      previous.index === next.index &&
+      previous.top === next.top &&
+      previous.left === next.left
+    ) {
+      return;
+    }
+    slashMenuRef.current = next;
+    setSlashMenu(next);
   };
 
-  const handleDelete = async () => {
-    console.log("Deleting entry", entryId);
-    const res = await fetch(`/api/auth/entries/${entryId}`, {
-      method: "DELETE",
-    });
-    if (res.ok) {
-      router.push("/");
-    }
-  };
+  const syncSlashRef = useRef(syncSlash);
+  syncSlashRef.current = syncSlash;
+
+  useImperativeHandle(ref, () => ({
+    flush: async () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      await enqueueSave();
+    },
+  }));
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        bulletList: false,
+        orderedList: false,
+        listItem: false,
+        blockquote: false,
+        underline: false,
+      }),
+      ListItem,
+      BulletList,
+      OrderedList,
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+      Emoji,
+      Blockquote,
+      Underline,
+      Placeholder.configure({
+        placeholder: ({ node }) =>
+          node.type.name === "paragraph" ? "Press / to insert blocks" : "",
+        showOnlyCurrent: true,
+      }),
+      slashExtension,
+      exitCodeBlock,
+    ],
+    autofocus: "end",
+    immediatelyRender: true,
+    onUpdate: () => {
+      scheduleRef.current();
+    },
+    onTransaction: ({ editor: current }) => {
+      setUpdateTrigger((prev) => prev + 1);
+      syncSlashRef.current(current);
+    },
+    content: content ?? undefined,
+  });
+
+  useEffect(() => {
+    editorRef.current = editor;
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor || !content || revisionRef.current !== 0) return;
+    editor.commands.setContent(content, { emitUpdate: false });
+  }, [editor, content]);
 
   const getCurrentTextStyle = () => {
     if (!editor) return "paragraph";
-
     if (editor.isActive("codeBlock")) return "codeBlock";
     if (editor.isActive("blockquote")) return "blockquote";
     if (editor.isActive("heading", { level: 1 })) return "h1";
     if (editor.isActive("heading", { level: 2 })) return "h2";
     if (editor.isActive("heading", { level: 3 })) return "h3";
-    if (editor.isActive("heading", { level: 4 })) return "h4";
-    if (editor.isActive("heading", { level: 5 })) return "h5";
-    if (editor.isActive("heading", { level: 6 })) return "h6";
     if (editor.isActive("orderedList")) return "orderedList";
     if (editor.isActive("bulletList")) return "bulletList";
     if (editor.isActive("taskList")) return "taskList";
-
     return "paragraph";
   };
 
   const handleTextStyleChange = (value: string) => {
     if (!editor) return;
 
-    if (value === "paragraph") {
-      editor.chain().focus().setParagraph().run();
-    } else if (value === "blockquote") {
-      editor.chain().focus().toggleBlockquote().run();
-    } else if (value === "codeBlock") {
-      editor.chain().focus().toggleCodeBlock().run();
-    } else if (value === "orderedList") {
-      editor.chain().focus().toggleOrderedList().run();
-    } else if (value === "bulletList") {
-      editor.chain().focus().toggleBulletList().run();
-    } else if (value === "taskList") {
-      editor.chain().focus().toggleTaskList().run();
-    } else {
-      const level = parseInt(value.replace("h", "")) as 1 | 2 | 3 | 4 | 5 | 6;
-      editor.chain().focus().toggleHeading({ level }).run();
+    let chain = editor.chain().focus();
+    const inTask = editor.isActive("taskItem");
+    const inList = editor.isActive("listItem");
+
+    if (value !== "taskList" && inTask) chain = chain.liftListItem("taskItem");
+    if (value !== "bulletList" && value !== "orderedList" && inList) {
+      chain = chain.liftListItem("listItem");
     }
+    if (value === "taskList" && inList) chain = chain.liftListItem("listItem");
+    if (value !== "blockquote" && editor.isActive("blockquote")) {
+      chain = chain.toggleBlockquote();
+    }
+    if (value !== "codeBlock" && editor.isActive("codeBlock")) {
+      chain = chain.toggleCodeBlock();
+    }
+
+    if (value === "paragraph") {
+      chain = chain.setParagraph();
+    } else if (value === "blockquote") {
+      chain = chain.toggleBlockquote();
+    } else if (value === "codeBlock") {
+      chain = chain.toggleCodeBlock();
+    } else if (value === "orderedList") {
+      if (!editor.isActive("orderedList")) chain = chain.toggleOrderedList();
+    } else if (value === "bulletList") {
+      if (!editor.isActive("bulletList")) chain = chain.toggleBulletList();
+    } else if (value === "taskList") {
+      if (!inTask) chain = chain.toggleTaskList();
+    } else {
+      const level = parseInt(value.replace("h", ""), 10) as 1 | 2 | 3;
+      chain = chain.setHeading({ level });
+    }
+
+    chain.run();
   };
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit,
-      BulletList.configure({
-        HTMLAttributes: {
-          class: "list-disc",
-        },
-      }),
-      Emoji,
-      TaskList,
-      OrderedList,
-      BulletList,
-      Blockquote.configure({
-        HTMLAttributes: {
-          class: "border-l-4 border-gray-300 pl-4 my-6 italic text-gray-700",
-        },
-      }),
-      Underline,
-      Placeholder.configure({
-        placeholder: ({ node }) => {
-          if (node.type.name === "heading") {
-            return "What's on your mind...";
-          }
-          return "Start writing…";
-        },
-      }),
-      TaskItem.configure({
-        nested: true,
-      }),
-    ],
-    autofocus: false,
-    immediatelyRender: true,
-    onUpdate: ({ editor }) => {
-      scheduleSave(editor.getJSON());
+  const applySlash = (match: SlashMatch, value: string) => {
+    if (!editor) return;
+    dismissedSlashRef.current = null;
+    slashMenuRef.current = null;
+    setSlashMenu(null);
+    editor.chain().focus().deleteRange({ from: match.from, to: match.to }).run();
+    handleTextStyleChange(value);
+  };
+
+  const activeSlash = () => {
+    if (!editor) return null;
+    const match = readSlash(editor);
+    if (!match || dismissedSlashRef.current === match.from) return null;
+    return match;
+  };
+
+  slashControllerRef.current = {
+    onEnter: () => {
+      const match = activeSlash();
+      if (!match) return false;
+      const items = filterSlashCommands(match.query);
+      if (!items.length) return false;
+      const highlighted =
+        slashMenuRef.current && slashMenuRef.current.from === match.from
+          ? slashMenuRef.current.index
+          : 0;
+      applySlash(match, items[Math.min(highlighted, items.length - 1)].value);
+      return true;
     },
-    onTransaction: () => {
-      // Force immediate re-render on any transaction (including formatting changes)
-      setUpdateTrigger((prev) => prev + 1);
+    onArrow: (delta) => {
+      const match = activeSlash();
+      if (!match) return false;
+      const items = filterSlashCommands(match.query);
+      if (!items.length) return false;
+      const current = slashMenuRef.current;
+      const index =
+        current && current.from === match.from
+          ? (current.index + delta + items.length) % items.length
+          : delta > 0
+            ? 0
+            : items.length - 1;
+      const next = {
+        ...match,
+        index,
+        top: current?.top ?? 8,
+        left: current?.left ?? 8,
+      };
+      slashMenuRef.current = next;
+      setSlashMenu(next);
+      return true;
     },
-    content: content || undefined, // Let TipTap create default empty content if no content
-  });
+    onEscape: () => {
+      const match = activeSlash();
+      if (!match) return false;
+      dismissedSlashRef.current = match.from;
+      slashMenuRef.current = null;
+      setSlashMenu(null);
+      return true;
+    },
+  };
+
+  if (!editor) return null;
 
   return (
-    <div className="w-full">
-      {!editor ? (
-        <div className="flex items-center justify-center h-full">
-          Loading...
-        </div>
-      ) : (
-        <div>
-          <div className="flex justify-between items-center w-full p-4 border-b">
-            <div>
-              <button
-                onClick={handleExitEditor}
-                className="flex items-center gap-2"
-              >
-                <FaArrowLeft size={16} />
-                <span className="text-left">Exit Editor</span>
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">
-                {lastSavedAt
-                  ? `Last updated: ${new Date(lastSavedAt).toLocaleString()}`
-                  : "No updates yet"}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleDelete()}
-              >
-                <FaTrash size={16} className="text-red-400" />
-              </Button>
-            </div>
-          </div>
-          <div className="p-6">
-            <div className="sticky top-0 z-10 flex items-center justify-center mb-6 py-4 -mx-6 px-6 bg-background/75 backdrop-blur-sm">
-              <div className="flex items-center justify-center rounded drop-shadow-sm bg-gray-50 dark:bg-neutral-800 gap-2">
-                <div>
-                  <Select
-                    value={getCurrentTextStyle()}
-                    onValueChange={handleTextStyleChange}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Text Style" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel>Text Style</SelectLabel>
-                        <SelectItem value="paragraph">Paragraph</SelectItem>
-                        <SelectItem value="h1">H1</SelectItem>
-                        <SelectItem value="h2">H2</SelectItem>
-                        <SelectItem value="h3">H3</SelectItem>
-                        <SelectItem value="h4">H4</SelectItem>
-                        <SelectItem value="h5">H5</SelectItem>
-                        <SelectItem value="h6">H6</SelectItem>
-                        <SelectItem value="blockquote">Blockquote</SelectItem>
-                        <SelectItem value="taskList">Task List</SelectItem>
-                        <SelectItem value="orderedList">
-                          Ordered List
-                        </SelectItem>
-                        <SelectItem value="bulletList">Bullet List</SelectItem>
-                        <SelectItem value="codeBlock">Code Block</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => editor.chain().focus().toggleBold().run()}
-                    className={
-                      editor.isActive("bold")
-                        ? "bg-gray-200 dark:bg-neutral-700"
-                        : ""
-                    }
-                  >
-                    <FaBold size={16} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => editor.chain().focus().toggleItalic().run()}
-                    className={
-                      editor.isActive("italic")
-                        ? "bg-gray-200 dark:bg-neutral-700"
-                        : ""
-                    }
-                  >
-                    <FaItalic size={16} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() =>
-                      editor.chain().focus().toggleUnderline().run()
-                    }
-                    className={
-                      editor.isActive("underline")
-                        ? "bg-gray-200 dark:bg-neutral-700"
-                        : ""
-                    }
-                  >
-                    <FaUnderline size={16} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => editor.chain().focus().toggleStrike().run()}
-                    className={
-                      editor.isActive("strike")
-                        ? "bg-gray-200 dark:bg-neutral-700"
-                        : ""
-                    }
-                  >
-                    <FaStrikethrough size={16} />
-                  </Button>
-                </div>
-              </div>
-            </div>
-            <EditorContent editor={editor} className="min-h-[200px]" />
-          </div>
-        </div>
+    <div className="journal-editor pb-28">
+      <EditorContent editor={editor} />
+      {slashMenu && (
+        <SlashMenu
+          query={slashMenu.query}
+          index={slashMenu.index}
+          top={slashMenu.top}
+          left={slashMenu.left}
+          onHover={(index) => {
+            const next = slashMenuRef.current
+              ? { ...slashMenuRef.current, index }
+              : null;
+            slashMenuRef.current = next;
+            setSlashMenu(next);
+          }}
+          onSelect={(value) => {
+            const match = slashMenuRef.current;
+            if (match) applySlash(match, value);
+          }}
+        />
       )}
+      <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-black/5 bg-white px-1.5 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#2a2a28]">
+        <div ref={styleMenuRef} className="relative">
+          <button
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setStyleMenuOpen((open) => !open)}
+            className="flex h-8 cursor-pointer items-center gap-2 px-3 text-sm"
+          >
+            {TEXT_STYLES.find((style) => style.value === getCurrentTextStyle())
+              ?.label ?? "Paragraph"}
+            <ChevronDownIcon className="size-4 opacity-50" />
+          </button>
+          {styleMenuOpen && (
+            <div className="absolute bottom-full left-0 z-40 mb-2 min-w-40 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]">
+              {TEXT_STYLES.map((style) => {
+                const active = style.value === getCurrentTextStyle();
+                return (
+                  <button
+                    key={style.value}
+                    type="button"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      handleTextStyleChange(style.value);
+                      setStyleMenuOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/10",
+                      active && "bg-black/5 dark:bg-white/10"
+                    )}
+                  >
+                    {style.label}
+                    {active && <CheckIcon className="size-4" />}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <span className="mx-1 h-4 w-px bg-black/10 dark:bg-white/15" />
+        <FormatButton
+          label="B"
+          active={editor.isActive("bold")}
+          className="font-semibold"
+          onClick={() => editor.chain().focus().toggleBold().run()}
+        />
+        <FormatButton
+          label="I"
+          active={editor.isActive("italic")}
+          className="italic"
+          onClick={() => editor.chain().focus().toggleItalic().run()}
+        />
+        <FormatButton
+          label="U"
+          active={editor.isActive("underline")}
+          className="underline"
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+        />
+        <FormatButton
+          label="S"
+          active={editor.isActive("strike")}
+          className="line-through"
+          onClick={() => editor.chain().focus().toggleStrike().run()}
+        />
+      </div>
     </div>
   );
+});
+
+function FormatButton({
+  label,
+  active,
+  className,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  className?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className={cn(
+        "cursor-pointer px-2 text-sm",
+        active ? "text-inherit" : "text-[#8a847a]",
+        className
+      )}
+    >
+      {label}
+    </button>
+  );
 }
+
+export default EntryCard;
