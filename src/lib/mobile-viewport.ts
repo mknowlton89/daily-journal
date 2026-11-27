@@ -23,7 +23,7 @@ export function toolbarShiftPx(
 }
 
 const NAV_CLEARANCE = 56;
-const TOOLBAR_CLEARANCE = 76;
+const TOOLBAR_CLEARANCE = 64;
 
 /** How far to scroll so the caret stays between the sticky nav and the toolbar. */
 export function caretScrollDelta(
