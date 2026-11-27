@@ -1,19 +1,18 @@
 import type { Session } from "next-auth";
 import {
   createEntryForDate,
-  getEntrySummaries,
+  listEntries,
 } from "@/app/lib/models/EntryModel";
 import { isValidDateKey } from "@/lib/dates";
 import { withAuthAndDB } from "@/lib/with-auth-and-db";
 
-export const GET = withAuthAndDB(async (session: Session, request: Request) => {
+export const GET = withAuthAndDB(async (session: Session) => {
   const userId = session?.user?.userId;
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const query = new URL(request.url).searchParams.get("q")?.trim() ?? "";
-  const entries = await getEntrySummaries(userId, query.slice(0, 100) || undefined);
+  const entries = await listEntries(userId);
   return Response.json(entries, { status: 200 });
 });
 
@@ -33,7 +32,8 @@ export const POST = withAuthAndDB(
       );
     }
 
-    const entry = await createEntryForDate(userId, entryDate, body.content);
+    const hasText = body.hasText === true;
+    const entry = await createEntryForDate(userId, entryDate, body.content, hasText);
     return Response.json(entry, { status: 201 });
   }
 );

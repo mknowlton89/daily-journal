@@ -1,14 +1,10 @@
 import mongoose from "mongoose";
 import uniqid from "uniqid";
 import { JSONContent } from "@tiptap/react";
+import { encryptContent, isSealedContent, type SealedContent } from "@/lib/content-cipher";
 import { formatEntryDateKey } from "@/lib/dates";
-import {
-  buildPreview,
-  escapeRegex,
-  extractPlainText,
-  RichTextNode,
-} from "@/lib/entry-text";
-import { EntryInterface, EntryNeighbor } from "../types/Entry/entries";
+import { extractPlainText, RichTextNode } from "@/lib/entry-text";
+import { EntryInterface, EntryNeighbor, StoredEntry } from "../types/Entry/entries";
 
 const EntrySchema = new mongoose.Schema({
   id: {
@@ -18,7 +14,7 @@ const EntrySchema = new mongoose.Schema({
   dateCreated: Date,
   dateUpdated: Date,
   entryDate: String,
-  plainText: String,
+  hasText: Boolean,
   userId: String,
   content: {
     type: mongoose.Schema.Types.Mixed,
@@ -28,7 +24,13 @@ const EntrySchema = new mongoose.Schema({
 
 EntrySchema.index({ userId: 1, entryDate: 1 });
 
-if (mongoose.models.Entry && !mongoose.models.Entry.schema.path("entryDate")) {
+const cachedEntry = mongoose.models.Entry;
+if (
+  cachedEntry &&
+  (!cachedEntry.schema.path("entryDate") ||
+    !cachedEntry.schema.path("hasText") ||
+    cachedEntry.schema.path("plainText"))
+) {
   mongoose.deleteModel("Entry");
 }
 
@@ -39,12 +41,12 @@ type EntryRecord = {
   dateCreated?: Date;
   dateUpdated?: Date;
   entryDate?: string;
-  plainText?: string;
+  hasText?: boolean;
   userId?: string;
   content?: RichTextNode;
 };
 
-const hasText = { plainText: { $regex: "\\S" } };
+const withText = { hasText: true };
 
 function serializeEntry(entry: EntryRecord): EntryInterface {
   return {
@@ -62,46 +64,69 @@ function serializeNeighbor(entry: EntryRecord | null): EntryNeighbor | null {
   return { id: entry.id, entryDate: entry.entryDate };
 }
 
-function readableText(entry: { plainText?: string; content?: unknown }) {
-  const stored = typeof entry.plainText === "string" ? entry.plainText.trim() : "";
-  if (stored) return stored;
-  return extractPlainText(entry.content as RichTextNode | string | null).trim();
-}
-
 function readableDate(entry: { entryDate?: string; dateCreated?: Date }) {
   if (entry.entryDate) return entry.entryDate;
   if (entry.dateCreated) return formatEntryDateKey(new Date(entry.dateCreated));
   return "";
 }
 
+async function sealStoredEntries(userId: string) {
+  const rows = (await Entry.collection
+    .find({
+      userId,
+      $or: [
+        { plainText: { $exists: true } },
+        { hasText: { $exists: false } },
+        { content: { $exists: true, $ne: null }, "content.sealed": { $ne: 1 } },
+      ],
+    })
+    .toArray()) as {
+    _id: unknown;
+    content?: unknown;
+    plainText?: unknown;
+    hasText?: unknown;
+  }[];
+
+  const key = process.env.ENTRY_CONTENT_KEY;
+  for (const row of rows) {
+    const sealed = isSealedContent(row.content);
+    const legacyText =
+      typeof row.plainText === "string"
+        ? row.plainText.trim()
+        : !sealed
+          ? extractPlainText(row.content as RichTextNode | string | null).trim()
+          : "";
+    const hasText =
+      typeof row.plainText === "string" || !sealed
+        ? legacyText.length > 0
+        : row.hasText === true;
+    const $set: Record<string, unknown> = { hasText };
+    if (row.content != null && !sealed) {
+      if (!key) throw new Error("ENTRY_CONTENT_KEY is not configured");
+      $set.content = await encryptContent(row.content as JSONContent, key);
+    }
+    await Entry.collection.updateOne(
+      { _id: row._id as mongoose.Types.ObjectId },
+      { $set, $unset: { plainText: "" } }
+    );
+  }
+}
+
 async function backfillEntries(userId: string) {
   const missing = await Entry.find({
     userId,
-    $or: [
-      { entryDate: { $in: [null, ""] } },
-      { entryDate: { $exists: false } },
-      { plainText: { $in: [null, ""] } },
-      { plainText: { $exists: false } },
-    ],
+    $or: [{ entryDate: { $in: [null, ""] } }, { entryDate: { $exists: false } }],
   });
 
   await Promise.all(
     missing.map(async (entry) => {
-      let changed = false;
       const entryDate = readableDate(entry);
-      const plainText = readableText(entry);
-
-      if (entry.entryDate !== entryDate && entryDate) {
-        entry.entryDate = entryDate;
-        changed = true;
-      }
-      if ((entry.plainText ?? "") !== plainText) {
-        entry.plainText = plainText;
-        changed = true;
-      }
-      if (changed) await entry.save();
+      if (!entryDate || entry.entryDate === entryDate) return;
+      entry.entryDate = entryDate;
+      await entry.save();
     })
   );
+  await sealStoredEntries(userId);
 }
 
 export async function getDayContext(userId: string, entryDate: string) {
@@ -112,7 +137,7 @@ export async function getDayContext(userId: string, entryDate: string) {
     Entry.findOne({
       userId,
       entryDate: { $lt: entryDate },
-      ...hasText,
+      ...withText,
     })
       .sort({ entryDate: -1 })
       .select("id entryDate")
@@ -120,7 +145,7 @@ export async function getDayContext(userId: string, entryDate: string) {
     Entry.findOne({
       userId,
       entryDate: { $gt: entryDate },
-      ...hasText,
+      ...withText,
     })
       .sort({ entryDate: 1 })
       .select("id entryDate")
@@ -128,7 +153,7 @@ export async function getDayContext(userId: string, entryDate: string) {
   ]);
 
   const entry =
-    candidates.find((item) => item.plainText?.trim()) ?? candidates[0] ?? null;
+    candidates.find((item) => item.hasText) ?? candidates[0] ?? null;
 
   return {
     date: entryDate,
@@ -138,54 +163,53 @@ export async function getDayContext(userId: string, entryDate: string) {
   };
 }
 
-export async function getEntrySummaries(userId: string, query?: string) {
+export async function listEntries(userId: string): Promise<StoredEntry[]> {
   await backfillEntries(userId);
 
-  const filter: Record<string, unknown> = {
-    userId,
-    plainText: query
-      ? { $regex: escapeRegex(query), $options: "i" }
-      : { $regex: "\\S" },
-  };
-
-  const entries = await Entry.find(filter)
+  const entries = await Entry.find({ userId, ...withText })
     .sort({ entryDate: -1, dateUpdated: -1 })
-    .select("id entryDate dateUpdated plainText")
+    .select("id entryDate dateUpdated content")
     .lean<EntryRecord[]>();
 
   const seen = new Set<string>();
-  const summaries = [];
+  const stored: StoredEntry[] = [];
 
   for (const entry of entries) {
     if (!entry.entryDate || seen.has(entry.entryDate)) continue;
     seen.add(entry.entryDate);
-    summaries.push({
+    stored.push({
       id: entry.id,
       entryDate: entry.entryDate,
       dateUpdated: entry.dateUpdated ?? null,
-      preview: buildPreview(entry.plainText ?? "", query),
+      content: entry.content as StoredEntry["content"],
     });
   }
 
-  return summaries;
+  return stored;
 }
 
 export async function createEntryForDate(
   userId: string,
   entryDate: string,
-  content?: JSONContent
+  content?: JSONContent | SealedContent,
+  hasText = false
 ) {
-  const plainText = extractPlainText(content);
+  const writing = hasText === true;
   const existing = await Entry.findOne({ userId, entryDate }).sort({
     dateUpdated: -1,
   });
 
   if (existing) {
     if (content) {
+      await Entry.collection.updateOne(
+        { _id: existing._id },
+        {
+          $set: { content, hasText: writing, dateUpdated: new Date() },
+          $unset: { plainText: "" },
+        }
+      );
       existing.content = content;
-      existing.plainText = plainText;
       existing.dateUpdated = new Date();
-      await existing.save();
     }
     return serializeEntry(existing);
   }
@@ -195,7 +219,7 @@ export async function createEntryForDate(
     userId,
     entryDate,
     content,
-    plainText,
+    hasText: writing,
     dateCreated: new Date(),
     dateUpdated: new Date(),
   });
@@ -207,15 +231,21 @@ export function getEntryById(id: string, userId: string) {
   return Entry.findOne({ id, userId });
 }
 
-export function updateEntry(id: string, userId: string, content: JSONContent) {
-  return Entry.updateOne(
+export function updateEntry(
+  id: string,
+  userId: string,
+  content: JSONContent | SealedContent,
+  hasText = false
+) {
+  return Entry.collection.updateOne(
     { id, userId },
     {
       $set: {
         content,
-        plainText: extractPlainText(content),
+        hasText: hasText === true,
         dateUpdated: new Date(),
       },
+      $unset: { plainText: "" },
     }
   );
 }

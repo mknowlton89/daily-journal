@@ -40,7 +40,7 @@ export const PUT = withAuthAndDB(
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     const body = await request.json();
-    const entry = await updateEntry(id, userId, body.content);
+    const entry = await updateEntry(id, userId, body.content, body.hasText === true);
     return Response.json(entry, { status: 200 });
   }
 );

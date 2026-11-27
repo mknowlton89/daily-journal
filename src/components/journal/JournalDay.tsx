@@ -9,6 +9,7 @@ import { useApi } from "@/lib/hooks/useApi";
 import EntryCard, { EntryEditorHandle } from "@/components/ui/EntryCard";
 import DayHeading from "./DayHeading";
 import DayNav from "./DayNav";
+import { useOpenedContent } from "@/lib/use-opened-content";
 import { journalColumnClass, journalMutedClass, journalShellClass } from "./shell";
 
 export default function JournalDay({
@@ -179,25 +180,29 @@ function DayBody({
     return () => registerDelete(null);
   }, [handleDelete, registerDelete]);
 
-  const content: JSONContent | undefined = removed
-    ? undefined
-    : (entry?.content ?? undefined);
+  const opened = useOpenedContent(removed ? undefined : entry?.content);
 
   return (
     <>
       <DayHeading date={date} today={today} savedAt={savedAt} />
+      {!opened.ready ? (
+        <p className={journalMutedClass}>Loading…</p>
+      ) : opened.failed ? (
+        <p className={journalMutedClass}>Couldn’t open this entry.</p>
+      ) : (
       <EntryCard
         ref={editorRef}
         key={removed ? `${date}-cleared` : date}
         entryId={removed ? null : entryId}
         entryDate={date}
-        content={content}
+        content={opened.content}
         onSaved={(info) => {
           setEntryId(info.id);
           setSavedAt(info.savedAt);
           onSavedEntry(info);
         }}
       />
+      )}
     </>
   );
 }
