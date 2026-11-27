@@ -23,7 +23,7 @@ export default function DayNav({
   onDelete?: () => void;
 }) {
   return (
-    <header className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-black/5 px-4 py-3 sm:px-6 dark:border-white/10">
+    <header className="sticky top-0 z-20 grid grid-cols-[1fr_auto_1fr] items-center border-b border-black/5 bg-[#f6f4f0] px-4 py-3 sm:px-6 dark:border-white/10 dark:bg-[#0e0e0c]">
       <div className="justify-self-start">
         {previousDate && (
           <button

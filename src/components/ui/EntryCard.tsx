@@ -43,6 +43,7 @@ import { PromptDeletedToast, PromptMenu } from "@/components/journal/prompt-menu
 import { EmptyEntryHint } from "@/components/journal/EmptyEntryHint";
 import { usePromptLibrary } from "@/components/journal/use-prompt-library";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
+import { caretScrollDelta, keyboardInsetPx, toolbarShiftPx } from "@/lib/mobile-viewport";
 import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
@@ -93,7 +94,8 @@ function slashPosition(
   const coords = editor.view.coordsAtPos(pos);
   const menuHeight = Math.max(itemCount, 1) * 34 + 12;
   const left = Math.max(8, Math.min(coords.left, window.innerWidth - 196));
-  const spaceBelow = window.innerHeight - coords.bottom;
+  const visibleHeight = window.visualViewport?.height ?? window.innerHeight;
+  const spaceBelow = visibleHeight - coords.bottom;
   if (spaceBelow < menuHeight + 80) {
     return { top: Math.max(8, coords.top - menuHeight - 8), left };
   }
@@ -124,6 +126,7 @@ const EntryCard = forwardRef<
   favoriteRef.current = favoriteDraft;
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   const styleMenuRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const entryIdRef = useRef(entryId);
   const onSavedRef = useRef(onSaved);
   const revisionRef = useRef(0);
@@ -363,6 +366,114 @@ const EntryCard = forwardRef<
     if (!editor || !content || revisionRef.current !== 0) return;
     editor.commands.setContent(content, { emitUpdate: false });
   }, [editor, content]);
+
+  useEffect(() => {
+    if (!editor) return;
+    let inset = 0;
+    let followUntil = 0;
+    let attempts = 0;
+    let shift = 0;
+
+    const applyInset = () => {
+      const viewport = window.visualViewport;
+      const layoutHeight = document.documentElement.clientHeight;
+      const next = keyboardInsetPx(
+        layoutHeight,
+        viewport?.height ?? layoutHeight
+      );
+      document.documentElement.style.setProperty(
+        "--keyboard-inset",
+        `${next}px`
+      );
+      const delta = next - inset;
+      inset = next;
+      return delta;
+    };
+
+    const pinToolbar = () => {
+      const bar = toolbarRef.current;
+      const viewport = window.visualViewport;
+      if (!bar) return;
+      if (!viewport) {
+        shift = 0;
+        bar.style.transform = "";
+        return;
+      }
+      const next = toolbarShiftPx(
+        bar.getBoundingClientRect().bottom + shift,
+        viewport.height,
+        24
+      );
+      if (next === shift) return;
+      shift = next;
+      bar.style.transform = next ? `translate3d(0, ${-next}px, 0)` : "";
+    };
+
+    const scrollCaret = () => {
+      const dom = editor.view.dom;
+      const domFocused =
+        document.activeElement === dom || dom.contains(document.activeElement);
+      if (!editor.isFocused && !domFocused) return;
+      let coords: { top: number; bottom: number };
+      try {
+        coords = editor.view.coordsAtPos(editor.state.selection.head);
+      } catch {
+        return;
+      }
+      const viewport = window.visualViewport;
+      const delta = caretScrollDelta(
+        coords.top,
+        coords.bottom,
+        viewport?.height ?? window.innerHeight
+      );
+      if (delta === 0) return;
+      const before = window.scrollY;
+      window.scrollBy(0, delta);
+      if (
+        window.scrollY === before &&
+        attempts < 8 &&
+        performance.now() <= followUntil
+      ) {
+        attempts += 1;
+        requestAnimationFrame(scrollCaret);
+      }
+    };
+
+    const armCaret = () => {
+      followUntil = performance.now() + 700;
+      attempts = 0;
+      requestAnimationFrame(scrollCaret);
+    };
+
+    const onViewport = () => {
+      const delta = applyInset();
+      pinToolbar();
+      requestAnimationFrame(pinToolbar);
+      void document.body.offsetHeight;
+      if (Math.abs(delta) > 80) {
+        followUntil = performance.now() + 700;
+        attempts = 0;
+        scrollCaret();
+        return;
+      }
+      if (performance.now() <= followUntil) scrollCaret();
+    };
+
+    applyInset();
+    pinToolbar();
+    requestAnimationFrame(pinToolbar);
+    editor.on("selectionUpdate", armCaret);
+    editor.on("update", armCaret);
+    window.visualViewport?.addEventListener("resize", onViewport);
+    window.visualViewport?.addEventListener("scroll", onViewport);
+    return () => {
+      editor.off("selectionUpdate", armCaret);
+      editor.off("update", armCaret);
+      window.visualViewport?.removeEventListener("resize", onViewport);
+      window.visualViewport?.removeEventListener("scroll", onViewport);
+      document.documentElement.style.removeProperty("--keyboard-inset");
+    };
+  }, [editor]);
 
   const getCurrentTextStyle = () => {
     if (!editor) return "paragraph";
@@ -621,7 +732,7 @@ const EntryCard = forwardRef<
       : null;
 
   return (
-    <div className="journal-editor relative pb-28">
+    <div className="journal-editor relative">
       <EditorContent editor={editor} />
       {showEmptyEntryHint(
         !extractPlainText(editor.getJSON() as RichTextNode),
@@ -699,7 +810,11 @@ const EntryCard = forwardRef<
       )}
       {prompts.deletion && <PromptDeletedToast onUndo={prompts.undo} />}
       <PromptEntryRemovalToast className={prompts.deletion ? "bottom-40" : undefined} />
-      <div className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-black/5 bg-white px-1.5 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#2a2a28]">
+      <div
+        ref={toolbarRef}
+        className="pointer-events-none fixed inset-x-0 bottom-6 z-30 flex justify-center px-3"
+      >
+      <div className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full border border-black/5 bg-white px-1.5 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#2a2a28]">
         <div ref={styleMenuRef} className="relative">
           <button
             type="button"
@@ -762,6 +877,7 @@ const EntryCard = forwardRef<
           className="line-through"
           onClick={() => editor.chain().focus().toggleStrike().run()}
         />
+      </div>
       </div>
     </div>
   );
