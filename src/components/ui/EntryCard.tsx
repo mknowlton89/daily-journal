@@ -35,12 +35,16 @@ import {
 } from "@/components/journal/slash-menu";
 import { exitCodeBlock } from "@/components/journal/exit-code-block";
 import {
-  insertPromptFromSlash,
   JournalPrompt,
+  PromptEntryRemovalToast,
+  insertPromptFromSlash,
 } from "@/components/journal/journal-prompt";
+import { PromptDeletedToast, PromptMenu } from "@/components/journal/prompt-menu";
+import { EmptyEntryHint } from "@/components/journal/EmptyEntryHint";
+import { usePromptLibrary } from "@/components/journal/use-prompt-library";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
 import { caretScrollDelta, keyboardInsetPx, toolbarShiftPx } from "@/lib/mobile-viewport";
-import { promptForDate, promptPlaceholder } from "@/lib/prompts";
+import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
   flush: () => Promise<void>;
@@ -78,6 +82,8 @@ type SlashMenuState = SlashMatch & {
   index: number;
   top: number;
   left: number;
+  mode: "commands" | "prompts" | "compose";
+  promptFilter: string;
 };
 
 function slashPosition(
@@ -106,6 +112,18 @@ const EntryCard = forwardRef<
   }
 >(function EntryCard({ entryId, entryDate, content, onSaved }, ref) {
   const [, setUpdateTrigger] = useState(0);
+  const prompts = usePromptLibrary();
+  const promptApiRef = useRef(prompts.api);
+  promptApiRef.current = prompts.api;
+  const [draft, setDraft] = useState("");
+  const [saveForLater, setSaveForLater] = useState(false);
+  const [favoriteDraft, setFavoriteDraft] = useState(false);
+  const draftRef = useRef(draft);
+  const saveRef = useRef(saveForLater);
+  const favoriteRef = useRef(favoriteDraft);
+  draftRef.current = draft;
+  saveRef.current = saveForLater;
+  favoriteRef.current = favoriteDraft;
   const [styleMenuOpen, setStyleMenuOpen] = useState(false);
   const styleMenuRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -123,6 +141,10 @@ const EntryCard = forwardRef<
     onEnter: () => false,
     onArrow: () => false,
     onEscape: () => false,
+    onBackspace: () => false,
+    onText: () => false,
+    onHome: () => false,
+    onEnd: () => false,
   });
   const slashExtension = useRef(createSlashExtension(slashControllerRef)).current;
 
@@ -228,22 +250,41 @@ const EntryCard = forwardRef<
       return;
     }
 
-    let index = 0;
     const previous = slashMenuRef.current;
+    let position = { top: 8, left: 8 };
+    try {
+      position = slashPosition(current, match.to, 6);
+    } catch {
+      position = { top: 8, left: 8 };
+    }
+    if (previous && previous.from === match.from && previous.mode !== "commands") {
+      const next = { ...previous, to: match.to, ...position };
+      if (
+        previous.to === next.to &&
+        previous.top === next.top &&
+        previous.left === next.left
+      ) {
+        return;
+      }
+      slashMenuRef.current = next;
+      setSlashMenu(next);
+      return;
+    }
+
+    let index = 0;
     if (previous && previous.from === match.from && previous.query === match.query) {
       index = previous.index;
     }
     const items = filterSlashCommands(match.query);
     if (items.length) index = Math.min(index, items.length - 1);
 
-    let position = { top: 8, left: 8 };
-    try {
-      position = slashPosition(current, match.to, items.length || 1);
-    } catch {
-      position = { top: 8, left: 8 };
-    }
-
-    const next: SlashMenuState = { ...match, index, ...position };
+    const next: SlashMenuState = {
+      ...match,
+      index,
+      ...position,
+      mode: "commands",
+      promptFilter: "",
+    };
     if (
       previous &&
       previous.query === next.query &&
@@ -318,6 +359,8 @@ const EntryCard = forwardRef<
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  if (editor) prompts.bindEditor(editor);
 
   useEffect(() => {
     if (!editor || !content || revisionRef.current !== 0) return;
@@ -486,15 +529,76 @@ const EntryCard = forwardRef<
 
   const applySlash = (match: SlashMatch, value: string) => {
     if (!editor) return;
+    if (value === "prompt") {
+      const current = slashMenuRef.current;
+      const next: SlashMenuState = {
+        ...match,
+        index: 0,
+        top: current?.top ?? 8,
+        left: current?.left ?? 8,
+        mode: "prompts",
+        promptFilter: "",
+      };
+      slashMenuRef.current = next;
+      setSlashMenu(next);
+      return;
+    }
     dismissedSlashRef.current = null;
     slashMenuRef.current = null;
     setSlashMenu(null);
-    if (value === "prompt") {
-      insertPromptFromSlash(editor, match, promptForDate(entryDate));
-      return;
-    }
     editor.chain().focus().deleteRange({ from: match.from, to: match.to }).run();
     handleTextStyleChange(value);
+  };
+
+  const closeSlash = () => {
+    dismissedSlashRef.current = slashMenuRef.current?.from ?? null;
+    slashMenuRef.current = null;
+    setSlashMenu(null);
+    setDraft("");
+    setSaveForLater(false);
+    setFavoriteDraft(false);
+  };
+
+  const insertPromptText = (text: string) => {
+    const match = slashMenuRef.current;
+    if (!editor || !match || !text) return;
+    insertPromptFromSlash(editor, match, text);
+    closeSlash();
+  };
+
+  const submitPromptDraft = () => {
+    const state = composerState({
+      text: draftRef.current,
+      saveForLater: saveRef.current,
+      favorite: favoriteRef.current,
+    });
+    if (!state.canInsert) return;
+    if (state.saveForLater) {
+      promptApiRef.current.addSaved(state.trimmed, state.favorite);
+    }
+    insertPromptText(state.trimmed);
+  };
+
+  const activatePromptRow = () => {
+    const menu = slashMenuRef.current;
+    if (!menu) return;
+    const rows = pickerRows(promptApiRef.current.getLibrary(), menu.promptFilter).rows;
+    const row = rows[Math.min(menu.index, Math.max(rows.length - 1, 0))];
+    if (!row) return;
+    if (row.kind === "surprise") {
+      insertPromptText(promptApiRef.current.random());
+      return;
+    }
+    if (row.kind === "prompt") {
+      insertPromptText(row.prompt.text);
+      return;
+    }
+    setDraft("");
+    setSaveForLater(false);
+    setFavoriteDraft(false);
+    const next = { ...menu, mode: "compose" as const };
+    slashMenuRef.current = next;
+    setSlashMenu(next);
   };
 
   const activeSlash = () => {
@@ -504,42 +608,67 @@ const EntryCard = forwardRef<
     return match;
   };
 
+  const movePromptPicker = (edge: "home" | "end") => {
+    const menu = slashMenuRef.current;
+    if (!menu || menu.mode !== "prompts") return false;
+    const rows = pickerRows(promptApiRef.current.getLibrary(), menu.promptFilter).rows;
+    const index = edge === "home" ? pickerHomeIndex(rows) : pickerEndIndex(rows);
+    const next = { ...menu, index };
+    slashMenuRef.current = next;
+    setSlashMenu(next);
+    return true;
+  };
+
   slashControllerRef.current = {
     onEnter: () => {
+      const menu = slashMenuRef.current;
+      if (menu?.mode === "compose") {
+        submitPromptDraft();
+        return true;
+      }
+      if (menu?.mode === "prompts") {
+        activatePromptRow();
+        return true;
+      }
       const match = activeSlash();
       if (!match) return false;
       const items = filterSlashCommands(match.query);
       if (!items.length) return false;
       const highlighted =
-        slashMenuRef.current && slashMenuRef.current.from === match.from
-          ? slashMenuRef.current.index
-          : 0;
+        menu && menu.from === match.from ? menu.index : 0;
       applySlash(match, items[Math.min(highlighted, items.length - 1)].value);
       return true;
     },
     onArrow: (delta) => {
+      const menu = slashMenuRef.current;
       const match = activeSlash();
-      if (!match) return false;
-      const items = filterSlashCommands(match.query);
-      if (!items.length) return false;
-      const current = slashMenuRef.current;
-      const index =
-        current && current.from === match.from
-          ? (current.index + delta + items.length) % items.length
-          : delta > 0
-            ? 0
-            : items.length - 1;
-      const next = {
-        ...match,
-        index,
-        top: current?.top ?? 8,
-        left: current?.left ?? 8,
-      };
+      if (!match || !menu) return false;
+      const count =
+        menu.mode === "commands"
+          ? filterSlashCommands(match.query).length
+          : pickerRows(promptApiRef.current.getLibrary(), menu.promptFilter).rows.length;
+      if (!count) return false;
+      const index = (menu.index + delta + count) % count;
+      const next = { ...menu, ...match, index };
       slashMenuRef.current = next;
       setSlashMenu(next);
       return true;
     },
     onEscape: () => {
+      const menu = slashMenuRef.current;
+      if (menu?.mode === "compose") {
+        const next = { ...menu, mode: "prompts" as const };
+        slashMenuRef.current = next;
+        setSlashMenu(next);
+        setDraft("");
+        return true;
+      }
+      if (menu?.mode === "prompts") {
+        const next = { ...menu, mode: "commands" as const, index: 0, promptFilter: "" };
+        slashMenuRef.current = next;
+        setSlashMenu(next);
+        return true;
+      }
       const match = activeSlash();
       if (!match) return false;
       dismissedSlashRef.current = match.from;
@@ -547,14 +676,69 @@ const EntryCard = forwardRef<
       setSlashMenu(null);
       return true;
     },
+    onBackspace: () => {
+      const menu = slashMenuRef.current;
+      if (!menu || menu.mode === "commands") return false;
+      if (menu.mode === "compose") {
+        setDraft((value) => value.slice(0, -1));
+        return true;
+      }
+      if (!menu.promptFilter) {
+        const next = { ...menu, mode: "commands" as const, index: 0 };
+        slashMenuRef.current = next;
+        setSlashMenu(next);
+        return true;
+      }
+      const next = { ...menu, promptFilter: menu.promptFilter.slice(0, -1) };
+      slashMenuRef.current = next;
+      setSlashMenu(next);
+      return true;
+    },
+    onText: (text) => {
+      const menu = slashMenuRef.current;
+      if (!menu || menu.mode === "commands") return false;
+      if (menu.mode === "compose") {
+        setDraft((value) => value + text);
+        return true;
+      }
+      if (text === " ") {
+        const rows = pickerRows(promptApiRef.current.getLibrary(), menu.promptFilter).rows;
+        if (rows[menu.index]?.kind === "add") {
+          activatePromptRow();
+          return true;
+        }
+      }
+      const promptFilter = menu.promptFilter + text;
+      const rows = pickerRows(promptApiRef.current.getLibrary(), promptFilter).rows;
+      const matchIndex = rows.findIndex((row) => row.kind === "prompt");
+      const next = {
+        ...menu,
+        promptFilter,
+        index: promptFilter.trim() && matchIndex >= 0 ? matchIndex : 0,
+      };
+      slashMenuRef.current = next;
+      setSlashMenu(next);
+      return true;
+    },
+    onHome: () => movePromptPicker("home"),
+    onEnd: () => movePromptPicker("end"),
   };
 
   if (!editor) return null;
 
+  const promptPicker =
+    slashMenu && slashMenu.mode !== "commands"
+      ? pickerRows(prompts.library, slashMenu.promptFilter)
+      : null;
+
   return (
-    <div className="journal-editor">
+    <div className="journal-editor relative">
       <EditorContent editor={editor} />
-      {slashMenu && (
+      {showEmptyEntryHint(
+        !extractPlainText(editor.getJSON() as RichTextNode),
+        getCurrentTextStyle()
+      ) && <EmptyEntryHint editor={editor} />}
+      {slashMenu?.mode === "commands" && (
         <SlashMenu
           query={slashMenu.query}
           index={slashMenu.index}
@@ -573,6 +757,59 @@ const EntryCard = forwardRef<
           }}
         />
       )}
+      {slashMenu && promptPicker && (
+        <div
+          className="fixed z-40"
+          style={{ top: slashMenu.top, left: slashMenu.left }}
+        >
+          <PromptMenu
+            label="Insert a writing prompt"
+            rows={promptPicker.rows}
+            favorites={promptPicker.favorites}
+            rest={promptPicker.rest}
+            index={slashMenu.index}
+            showSurprise
+            composing={slashMenu.mode === "compose"}
+            draft={draft}
+            saveForLater={saveForLater}
+            favorite={favoriteDraft}
+            onHover={(index) => {
+              const next = slashMenuRef.current
+                ? { ...slashMenuRef.current, index }
+                : null;
+              slashMenuRef.current = next;
+              setSlashMenu(next);
+            }}
+            onActivate={(index) => {
+              const next = slashMenuRef.current
+                ? { ...slashMenuRef.current, index }
+                : null;
+              slashMenuRef.current = next;
+              if (next) setSlashMenu(next);
+              activatePromptRow();
+            }}
+            onToggleFavorite={(id) => prompts.api.toggleFavorite(id)}
+            onDelete={(id) => prompts.api.deletePrompt(id)}
+            onDraftChange={setDraft}
+            onSaveForLater={(value) => {
+              setSaveForLater(value);
+              if (!value) setFavoriteDraft(false);
+            }}
+            onFavoriteChange={setFavoriteDraft}
+            onCancelCompose={() => {
+              const next = slashMenuRef.current
+                ? { ...slashMenuRef.current, mode: "prompts" as const }
+                : null;
+              slashMenuRef.current = next;
+              setSlashMenu(next);
+              setDraft("");
+            }}
+            onSubmitCompose={submitPromptDraft}
+          />
+        </div>
+      )}
+      {prompts.deletion && <PromptDeletedToast onUndo={prompts.undo} />}
+      <PromptEntryRemovalToast className={prompts.deletion ? "bottom-40" : undefined} />
       <div
         ref={toolbarRef}
         className="pointer-events-none fixed inset-x-0 bottom-6 z-30 flex justify-center px-3"
