@@ -3,14 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ChevronLeft, Search } from "lucide-react";
-import { EntrySummary } from "@/app/lib/types/Entry/entries";
+import { EntrySummary, StoredEntry } from "@/app/lib/types/Entry/entries";
 import {
   formatMonthHeading,
   formatWeekday,
   hrefForEntryDate,
   parseEntryDateKey,
 } from "@/lib/dates";
-import { highlightParts } from "@/lib/entry-text";
+import { buildPreview, extractPlainText, highlightParts, type RichTextNode } from "@/lib/entry-text";
+import { openEntryContent } from "@/lib/content-key";
 import { useApi } from "@/lib/hooks/useApi";
 import AccountMenu from "./AccountMenu";
 import { useClientToday } from "./use-client-today";
@@ -25,19 +26,56 @@ export default function EntriesIndex() {
   const today = useClientToday();
   const [query, setQuery] = useState("");
   const [deferred, setDeferred] = useState("");
+  const [opened, setOpened] = useState<{
+    key: string;
+    rows: { entry: StoredEntry; text: string }[];
+  } | null>(null);
+  const [openError, setOpenError] = useState(false);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDeferred(query.trim()), 200);
     return () => clearTimeout(timeout);
   }, [query]);
 
-  const key = deferred
-    ? `/api/auth/entries?q=${encodeURIComponent(deferred)}`
-    : "/api/auth/entries";
-  const { data, error, isLoading } = useApi<EntrySummary[]>(key);
+  const { data, error, isLoading } = useApi<StoredEntry[]>("/api/auth/entries");
+  const dataKey = (data ?? [])
+    .map((entry) => `${entry.id}:${String(entry.dateUpdated)}`)
+    .join("|");
+
+  useEffect(() => {
+    if (!data) return;
+    let cancelled = false;
+    Promise.all(
+      data.map(async (entry) => {
+        const doc = await openEntryContent(entry.content);
+        return { entry, text: extractPlainText(doc as RichTextNode) };
+      })
+    )
+      .then((rows) => {
+        if (!cancelled) setOpened({ key: dataKey, rows });
+      })
+      .catch(() => {
+        if (!cancelled) setOpenError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [data, dataKey]);
+
+  const ready = opened?.key === dataKey ? opened.rows : null;
+  const visible = (ready ?? []).filter((row) => {
+    if (!deferred) return true;
+    return row.text.toLowerCase().includes(deferred.toLowerCase());
+  });
+  const summaries: EntrySummary[] = visible.map((row) => ({
+    id: row.entry.id,
+    entryDate: row.entry.entryDate,
+    dateUpdated: String(row.entry.dateUpdated ?? ""),
+    preview: buildPreview(row.text, deferred || undefined),
+  }));
 
   const groups: { label: string; entries: EntrySummary[] }[] = [];
-  for (const entry of data ?? []) {
+  for (const entry of summaries) {
     const label = formatMonthHeading(entry.entryDate);
     const last = groups[groups.length - 1];
     if (!last || last.label !== label) {
@@ -75,21 +113,21 @@ export default function EntriesIndex() {
           />
         </label>
 
-        {deferred && data && (
+        {deferred && ready && (
           <p className={`${journalMutedClass} mt-4 text-sm`}>
-            {data.length === 0
+            {summaries.length === 0
               ? `No entries match “${deferred}”`
-              : `${data.length} ${data.length === 1 ? "entry" : "entries"} match “${deferred}”`}
+              : `${summaries.length} ${summaries.length === 1 ? "entry" : "entries"} match “${deferred}”`}
           </p>
         )}
 
-        {isLoading && !data ? (
+        {isLoading || (data && !ready && !openError) ? (
           <p className={`${journalMutedClass} mt-8 text-sm`}>Loading…</p>
-        ) : error ? (
+        ) : error || openError ? (
           <p className={`${journalMutedClass} mt-8 text-sm`}>
             Couldn’t load entries.
           </p>
-        ) : data && data.length === 0 && !deferred ? (
+        ) : summaries.length === 0 && !deferred ? (
           <p className={`${journalMutedClass} mt-8 text-sm`}>No entries yet.</p>
         ) : (
           <div className="mt-8">
