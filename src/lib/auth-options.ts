@@ -1,5 +1,6 @@
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
+import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { createUser, getUserByEmail } from "../app/lib/models/UserModel";
 import { connectDB } from "../app/lib/mongodb";
@@ -9,6 +10,10 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt" as const,
   },
   providers: [
+    GoogleProvider({
+      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    }),
     CredentialsProvider({
       name: "Credentials",
       credentials: {
@@ -16,20 +21,15 @@ export const authOptions: NextAuthOptions = {
         password: {},
       },
       async authorize(credentials) {
-        console.log("Authorizing credentials:", credentials);
         try {
           await connectDB();
           const user = await getUserByEmail(credentials?.email ?? "");
-          if (!user) {
-            throw new Error("");
-          }
+          if (!user?.password) return null;
           const isValidPassword = await bcrypt.compare(
             credentials?.password ?? "",
-            user.password as string
+            user.password
           );
-          if (!isValidPassword) {
-            throw new Error("Invalid password");
-          }
+          if (!isValidPassword) return null;
           return user;
         } catch {
           return null;
@@ -39,20 +39,31 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async signIn({ account, profile }) {
-      if (account?.provider === "github" && profile) {
-        await connectDB();
-        const existingUser = await getUserByEmail(profile.email ?? "");
-        if (!existingUser) {
-          await createUser({
-            name: profile.name ?? "", //TODO: How to handle this?
-            email: profile.email ?? "", //TODO: How to handle this?
-          });
-        }
+      if (account?.provider !== "google") return true;
+      const email = profile?.email;
+      if (!email) return false;
+      await connectDB();
+      const existingUser = await getUserByEmail(email);
+      if (!existingUser) {
+        await createUser({
+          name: profile.name ?? "",
+          email,
+        });
       }
       return true;
     },
 
-    async jwt({ token, user }) {
+    async jwt({ token, user, account }) {
+      if (account?.provider === "google" && token.email) {
+        await connectDB();
+        const existingUser = await getUserByEmail(token.email);
+        if (existingUser) {
+          token.userId = existingUser.id;
+          token.name = existingUser.name;
+          token.email = existingUser.email;
+        }
+        return token;
+      }
       if (user) {
         token.id = user.id;
         token.email = user.email;
