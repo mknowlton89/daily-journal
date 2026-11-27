@@ -1,6 +1,7 @@
 "use client";
 
 import { Extension } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
 import type { Editor } from "@tiptap/react";
 import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,10 @@ export type SlashController = {
   onEnter: () => boolean;
   onArrow: (delta: number) => boolean;
   onEscape: () => boolean;
+  onBackspace: () => boolean;
+  onText: (text: string) => boolean;
+  onHome: () => boolean;
+  onEnd: () => boolean;
 };
 
 export function createSlashExtension(controller: { current: SlashController }) {
@@ -79,8 +84,21 @@ export function createSlashExtension(controller: { current: SlashController }) {
         ArrowDown: () => controller.current.onArrow(1),
         ArrowUp: () => controller.current.onArrow(-1),
         Escape: () => controller.current.onEscape(),
+        Home: () => controller.current.onHome(),
+        End: () => controller.current.onEnd(),
         Tab: () => controller.current.onEnter(),
+        Backspace: () => controller.current.onBackspace(),
       };
+    },
+    addProseMirrorPlugins() {
+      return [
+        new Plugin({
+          props: {
+            handleTextInput: (_view, _from, _to, text) =>
+              controller.current.onText(text),
+          },
+        }),
+      ];
     },
   });
 }
