@@ -23,8 +23,6 @@ import Underline from "@tiptap/extension-underline";
 import { EntryInterface } from "@/app/lib/types/Entry/entries";
 import { postApi } from "@/lib/hooks/useApi";
 import { mutate } from "swr";
-import { cn } from "@/lib/utils";
-import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import {
   SlashMenu,
   createSlashExtension,
@@ -43,7 +41,10 @@ import { PromptDeletedToast, PromptMenu } from "@/components/journal/prompt-menu
 import { EmptyEntryHint } from "@/components/journal/EmptyEntryHint";
 import { usePromptLibrary } from "@/components/journal/use-prompt-library";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
-import { caretScrollDelta, keyboardInsetPx, toolbarShiftPx } from "@/lib/mobile-viewport";
+import { caretScrollDelta, keyboardInsetPx } from "@/lib/mobile-viewport";
+import { caretOverlapScroll } from "@/lib/format-chrome";
+import FormatChrome from "@/components/journal/FormatChrome";
+import { applyBlockStyle, currentTextStyle } from "@/components/journal/format-commands";
 import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
@@ -65,18 +66,6 @@ function revalidateEntryList() {
     { revalidate: true }
   );
 }
-
-const TEXT_STYLES = [
-  { value: "paragraph", label: "Paragraph" },
-  { value: "h1", label: "Heading 1" },
-  { value: "h2", label: "Heading 2" },
-  { value: "h3", label: "Heading 3" },
-  { value: "blockquote", label: "Blockquote" },
-  { value: "taskList", label: "Task List" },
-  { value: "orderedList", label: "Ordered List" },
-  { value: "bulletList", label: "Bullet List" },
-  { value: "codeBlock", label: "Code Block" },
-] as const;
 
 type SlashMenuState = SlashMatch & {
   index: number;
@@ -124,9 +113,7 @@ const EntryCard = forwardRef<
   draftRef.current = draft;
   saveRef.current = saveForLater;
   favoriteRef.current = favoriteDraft;
-  const [styleMenuOpen, setStyleMenuOpen] = useState(false);
-  const styleMenuRef = useRef<HTMLDivElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [editorFocused, setEditorFocused] = useState(false);
   const entryIdRef = useRef(entryId);
   const onSavedRef = useRef(onSaved);
   const revisionRef = useRef(0);
@@ -155,24 +142,6 @@ const EntryCard = forwardRef<
   useEffect(() => {
     onSavedRef.current = onSaved;
   }, [onSaved]);
-
-  useEffect(() => {
-    if (!styleMenuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!styleMenuRef.current?.contains(event.target as Node)) {
-        setStyleMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setStyleMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [styleMenuOpen]);
 
   const enqueueSave = () => {
     const run = async () => {
@@ -372,7 +341,6 @@ const EntryCard = forwardRef<
     let inset = 0;
     let followUntil = 0;
     let attempts = 0;
-    let shift = 0;
 
     const applyInset = () => {
       const viewport = window.visualViewport;
@@ -390,42 +358,38 @@ const EntryCard = forwardRef<
       return delta;
     };
 
-    const pinToolbar = () => {
-      const bar = toolbarRef.current;
-      const viewport = window.visualViewport;
-      if (!bar) return;
-      if (!viewport) {
-        shift = 0;
-        bar.style.transform = "";
-        return;
-      }
-      const next = toolbarShiftPx(
-        bar.getBoundingClientRect().bottom + shift,
-        viewport.height,
-        24
-      );
-      if (next === shift) return;
-      shift = next;
-      bar.style.transform = next ? `translate3d(0, ${-next}px, 0)` : "";
-    };
-
     const scrollCaret = () => {
       const dom = editor.view.dom;
       const domFocused =
         document.activeElement === dom || dom.contains(document.activeElement);
       if (!editor.isFocused && !domFocused) return;
-      let coords: { top: number; bottom: number };
+      let coords: { top: number; bottom: number; left: number; right: number };
       try {
         coords = editor.view.coordsAtPos(editor.state.selection.head);
       } catch {
         return;
       }
       const viewport = window.visualViewport;
-      const delta = caretScrollDelta(
+      const anchor = document
+        .querySelector("[data-format-anchor]")
+        ?.getBoundingClientRect();
+      const overlap = caretOverlapScroll(
+        coords,
+        anchor
+          ? {
+              top: anchor.top,
+              bottom: anchor.bottom,
+              left: anchor.left,
+              right: anchor.right,
+            }
+          : null
+      );
+      const edge = caretScrollDelta(
         coords.top,
         coords.bottom,
         viewport?.height ?? window.innerHeight
       );
+      const delta = Math.abs(overlap) > Math.abs(edge) ? overlap : edge;
       if (delta === 0) return;
       const before = window.scrollY;
       window.scrollBy(0, delta);
@@ -445,10 +409,14 @@ const EntryCard = forwardRef<
       requestAnimationFrame(scrollCaret);
     };
 
+    const syncFocus = () => {
+      const dom = editor.view.dom;
+      const domFocused =
+        document.activeElement === dom || dom.contains(document.activeElement);
+      setEditorFocused(editor.isFocused || domFocused);
+    };
     const onViewport = () => {
       const delta = applyInset();
-      pinToolbar();
-      requestAnimationFrame(pinToolbar);
       void document.body.offsetHeight;
       if (Math.abs(delta) > 80) {
         followUntil = performance.now() + 700;
@@ -460,71 +428,31 @@ const EntryCard = forwardRef<
     };
 
     applyInset();
-    pinToolbar();
-    requestAnimationFrame(pinToolbar);
     editor.on("selectionUpdate", armCaret);
     editor.on("update", armCaret);
+    editor.on("focus", syncFocus);
+    editor.on("blur", syncFocus);
+    document.addEventListener("focusin", syncFocus);
+    document.addEventListener("focusout", syncFocus);
+    queueMicrotask(syncFocus);
     window.visualViewport?.addEventListener("resize", onViewport);
     window.visualViewport?.addEventListener("scroll", onViewport);
     return () => {
       editor.off("selectionUpdate", armCaret);
       editor.off("update", armCaret);
+      editor.off("focus", syncFocus);
+      editor.off("blur", syncFocus);
+      document.removeEventListener("focusin", syncFocus);
+      document.removeEventListener("focusout", syncFocus);
       window.visualViewport?.removeEventListener("resize", onViewport);
       window.visualViewport?.removeEventListener("scroll", onViewport);
       document.documentElement.style.removeProperty("--keyboard-inset");
     };
   }, [editor]);
 
-  const getCurrentTextStyle = () => {
-    if (!editor) return "paragraph";
-    if (editor.isActive("codeBlock")) return "codeBlock";
-    if (editor.isActive("blockquote")) return "blockquote";
-    if (editor.isActive("heading", { level: 1 })) return "h1";
-    if (editor.isActive("heading", { level: 2 })) return "h2";
-    if (editor.isActive("heading", { level: 3 })) return "h3";
-    if (editor.isActive("orderedList")) return "orderedList";
-    if (editor.isActive("bulletList")) return "bulletList";
-    if (editor.isActive("taskList")) return "taskList";
-    return "paragraph";
-  };
-
   const handleTextStyleChange = (value: string) => {
     if (!editor) return;
-
-    let chain = editor.chain().focus();
-    const inTask = editor.isActive("taskItem");
-    const inList = editor.isActive("listItem");
-
-    if (value !== "taskList" && inTask) chain = chain.liftListItem("taskItem");
-    if (value !== "bulletList" && value !== "orderedList" && inList) {
-      chain = chain.liftListItem("listItem");
-    }
-    if (value === "taskList" && inList) chain = chain.liftListItem("listItem");
-    if (value !== "blockquote" && editor.isActive("blockquote")) {
-      chain = chain.toggleBlockquote();
-    }
-    if (value !== "codeBlock" && editor.isActive("codeBlock")) {
-      chain = chain.toggleCodeBlock();
-    }
-
-    if (value === "paragraph") {
-      chain = chain.setParagraph();
-    } else if (value === "blockquote") {
-      chain = chain.toggleBlockquote();
-    } else if (value === "codeBlock") {
-      chain = chain.toggleCodeBlock();
-    } else if (value === "orderedList") {
-      if (!editor.isActive("orderedList")) chain = chain.toggleOrderedList();
-    } else if (value === "bulletList") {
-      if (!editor.isActive("bulletList")) chain = chain.toggleBulletList();
-    } else if (value === "taskList") {
-      if (!inTask) chain = chain.toggleTaskList();
-    } else {
-      const level = parseInt(value.replace("h", ""), 10) as 1 | 2 | 3;
-      chain = chain.setHeading({ level });
-    }
-
-    chain.run();
+    applyBlockStyle(editor, value);
   };
 
   const applySlash = (match: SlashMatch, value: string) => {
@@ -736,7 +664,7 @@ const EntryCard = forwardRef<
       <EditorContent editor={editor} />
       {showEmptyEntryHint(
         !extractPlainText(editor.getJSON() as RichTextNode),
-        getCurrentTextStyle()
+        currentTextStyle(editor)
       ) && <EmptyEntryHint editor={editor} />}
       {slashMenu?.mode === "commands" && (
         <SlashMenu
@@ -810,104 +738,13 @@ const EntryCard = forwardRef<
       )}
       {prompts.deletion && <PromptDeletedToast onUndo={prompts.undo} />}
       <PromptEntryRemovalToast className={prompts.deletion ? "bottom-40" : undefined} />
-      <div
-        ref={toolbarRef}
-        className="pointer-events-none fixed inset-x-0 bottom-6 z-30 flex justify-center px-3"
-      >
-      <div className="pointer-events-auto flex max-w-full items-center gap-1 rounded-full border border-black/5 bg-white px-1.5 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.12)] dark:border-white/10 dark:bg-[#2a2a28]">
-        <div ref={styleMenuRef} className="relative">
-          <button
-            type="button"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => setStyleMenuOpen((open) => !open)}
-            className="flex h-8 cursor-pointer items-center gap-2 px-3 text-sm"
-          >
-            {TEXT_STYLES.find((style) => style.value === getCurrentTextStyle())
-              ?.label ?? "Paragraph"}
-            <ChevronDownIcon className="size-4 opacity-50" />
-          </button>
-          {styleMenuOpen && (
-            <div className="absolute bottom-full left-0 z-40 mb-2 min-w-40 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]">
-              {TEXT_STYLES.map((style) => {
-                const active = style.value === getCurrentTextStyle();
-                return (
-                  <button
-                    key={style.value}
-                    type="button"
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      handleTextStyleChange(style.value);
-                      setStyleMenuOpen(false);
-                    }}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center justify-between rounded-sm px-2 py-1.5 text-left text-sm hover:bg-black/5 dark:hover:bg-white/10",
-                      active && "bg-black/5 dark:bg-white/10"
-                    )}
-                  >
-                    {style.label}
-                    {active && <CheckIcon className="size-4" />}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
-        <span className="mx-1 h-4 w-px bg-black/10 dark:bg-white/15" />
-        <FormatButton
-          label="B"
-          active={editor.isActive("bold")}
-          className="font-semibold"
-          onClick={() => editor.chain().focus().toggleBold().run()}
-        />
-        <FormatButton
-          label="I"
-          active={editor.isActive("italic")}
-          className="italic"
-          onClick={() => editor.chain().focus().toggleItalic().run()}
-        />
-        <FormatButton
-          label="U"
-          active={editor.isActive("underline")}
-          className="underline"
-          onClick={() => editor.chain().focus().toggleUnderline().run()}
-        />
-        <FormatButton
-          label="S"
-          active={editor.isActive("strike")}
-          className="line-through"
-          onClick={() => editor.chain().focus().toggleStrike().run()}
-        />
-      </div>
-      </div>
+      <FormatChrome
+        editor={editor}
+        focused={editorFocused}
+        suppressed={slashMenu !== null}
+      />
     </div>
   );
 });
-
-function FormatButton({
-  label,
-  active,
-  className,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  className?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={onClick}
-      className={cn(
-        "cursor-pointer px-2 text-sm",
-        active ? "text-inherit" : "text-[#8a847a]",
-        className
-      )}
-    >
-      {label}
-    </button>
-  );
-}
 
 export default EntryCard;
