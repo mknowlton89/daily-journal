@@ -5,6 +5,17 @@ html, body, :root {
   height: 100%;
 }
 
+html {
+  max-width: 100%;
+  overflow-x: clip;
+  background-color: #f6f4f0;
+  overscroll-behavior-y: none;
+}
+
+html.dark {
+  background-color: #0e0e0c;
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -124,12 +135,16 @@ html, body, :root {
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-[#f6f4f0] text-[#1c1916] dark:bg-[#0e0e0c] dark:text-[#f3efe6];
   }
 }
 
 .font-journal {
   font-family: var(--font-newsreader), Georgia, "Times New Roman", serif;
+}
+
+.journal-editor {
+  padding-bottom: calc(7rem + var(--keyboard-inset, 0px));
 }
 
 .journal-editor .tiptap p.is-empty::before {

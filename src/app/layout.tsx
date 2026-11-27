@@ -1,9 +1,7 @@
-"use client";
+import type { Viewport } from "next";
 import { Geist, Geist_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
-import { SessionProvider } from "next-auth/react";
-import { Provider as ThemeProvider } from "@/components/providers/ThemeProvider";
-import ProtectedPage from "@/components/ui/ProtectedPage";
+import AppProviders from "@/components/providers/AppProviders";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -22,6 +20,13 @@ const newsreader = Newsreader({
   display: "swap",
 });
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -32,11 +37,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${newsreader.variable} antialiased`}
       >
-        <ThemeProvider>
-          <SessionProvider>
-            <ProtectedPage>{children}</ProtectedPage>
-          </SessionProvider>
-        </ThemeProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

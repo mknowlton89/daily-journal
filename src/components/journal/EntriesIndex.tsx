@@ -49,8 +49,8 @@ export default function EntriesIndex() {
 
   return (
     <div className={journalShellClass}>
-      <div className={`${journalColumnClass} pb-16 pt-4`}>
-        <div className="flex items-center justify-between">
+      <header className="sticky top-0 z-20 bg-[#f6f4f0] dark:bg-[#0e0e0c]">
+        <div className={`${journalColumnClass} flex items-center justify-between py-3`}>
           <Link
             href="/"
             className={`${journalMutedClass} flex items-center gap-1 text-sm hover:text-[#1c1916] dark:hover:text-[#f3efe6]`}
@@ -60,8 +60,9 @@ export default function EntriesIndex() {
           </Link>
           <AccountMenu />
         </div>
-
-        <h1 className="font-journal mt-10 text-5xl">All entries</h1>
+      </header>
+      <div className={`${journalColumnClass} pb-16`}>
+        <h1 className="font-journal mt-8 text-5xl">All entries</h1>
 
         <label className="relative mt-8 block">
           <Search className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-[#8a847a]" />
@@ -70,7 +71,7 @@ export default function EntriesIndex() {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search entries"
             aria-label="Search entries"
-            className="w-full rounded-xl border border-black/5 bg-white/80 py-3 pr-4 pl-11 text-[15px] outline-none placeholder:text-[#8a847a] focus:border-black/10 dark:border-white/5 dark:bg-[#1c1c1a] dark:focus:border-white/10"
+            className="w-full min-w-0 rounded-xl border border-black/5 bg-white/80 py-3 pr-4 pl-11 text-base outline-none placeholder:text-[#8a847a] focus:border-black/10 dark:border-white/5 dark:bg-[#1c1c1a] dark:focus:border-white/10"
           />
         </label>
 
