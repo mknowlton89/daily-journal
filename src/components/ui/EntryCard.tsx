@@ -41,8 +41,6 @@ import { PromptDeletedToast, PromptMenu } from "@/components/journal/prompt-menu
 import { EmptyEntryHint } from "@/components/journal/EmptyEntryHint";
 import { usePromptLibrary } from "@/components/journal/use-prompt-library";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
-import { caretScrollDelta, keyboardInsetPx } from "@/lib/mobile-viewport";
-import { caretOverlapScroll } from "@/lib/format-chrome";
 import FormatChrome from "@/components/journal/FormatChrome";
 import { applyBlockStyle, currentTextStyle } from "@/components/journal/format-commands";
 import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
@@ -338,115 +336,22 @@ const EntryCard = forwardRef<
 
   useEffect(() => {
     if (!editor) return;
-    let inset = 0;
-    let followUntil = 0;
-    let attempts = 0;
-
-    const applyInset = () => {
-      const viewport = window.visualViewport;
-      const layoutHeight = document.documentElement.clientHeight;
-      const next = keyboardInsetPx(
-        layoutHeight,
-        viewport?.height ?? layoutHeight
-      );
-      document.documentElement.style.setProperty(
-        "--keyboard-inset",
-        `${next}px`
-      );
-      const delta = next - inset;
-      inset = next;
-      return delta;
-    };
-
-    const scrollCaret = () => {
-      const dom = editor.view.dom;
-      const domFocused =
-        document.activeElement === dom || dom.contains(document.activeElement);
-      if (!editor.isFocused && !domFocused) return;
-      let coords: { top: number; bottom: number; left: number; right: number };
-      try {
-        coords = editor.view.coordsAtPos(editor.state.selection.head);
-      } catch {
-        return;
-      }
-      const viewport = window.visualViewport;
-      const anchor = document
-        .querySelector("[data-format-anchor]")
-        ?.getBoundingClientRect();
-      const overlap = caretOverlapScroll(
-        coords,
-        anchor
-          ? {
-              top: anchor.top,
-              bottom: anchor.bottom,
-              left: anchor.left,
-              right: anchor.right,
-            }
-          : null
-      );
-      const edge = caretScrollDelta(
-        coords.top,
-        coords.bottom,
-        viewport?.height ?? window.innerHeight
-      );
-      const delta = Math.abs(overlap) > Math.abs(edge) ? overlap : edge;
-      if (delta === 0) return;
-      const before = window.scrollY;
-      window.scrollBy(0, delta);
-      if (
-        window.scrollY === before &&
-        attempts < 8 &&
-        performance.now() <= followUntil
-      ) {
-        attempts += 1;
-        requestAnimationFrame(scrollCaret);
-      }
-    };
-
-    const armCaret = () => {
-      followUntil = performance.now() + 700;
-      attempts = 0;
-      requestAnimationFrame(scrollCaret);
-    };
-
     const syncFocus = () => {
       const dom = editor.view.dom;
       const domFocused =
         document.activeElement === dom || dom.contains(document.activeElement);
       setEditorFocused(editor.isFocused || domFocused);
     };
-    const onViewport = () => {
-      const delta = applyInset();
-      void document.body.offsetHeight;
-      if (Math.abs(delta) > 80) {
-        followUntil = performance.now() + 700;
-        attempts = 0;
-        scrollCaret();
-        return;
-      }
-      if (performance.now() <= followUntil) scrollCaret();
-    };
-
-    applyInset();
-    editor.on("selectionUpdate", armCaret);
-    editor.on("update", armCaret);
     editor.on("focus", syncFocus);
     editor.on("blur", syncFocus);
     document.addEventListener("focusin", syncFocus);
     document.addEventListener("focusout", syncFocus);
     queueMicrotask(syncFocus);
-    window.visualViewport?.addEventListener("resize", onViewport);
-    window.visualViewport?.addEventListener("scroll", onViewport);
     return () => {
-      editor.off("selectionUpdate", armCaret);
-      editor.off("update", armCaret);
       editor.off("focus", syncFocus);
       editor.off("blur", syncFocus);
       document.removeEventListener("focusin", syncFocus);
       document.removeEventListener("focusout", syncFocus);
-      window.visualViewport?.removeEventListener("resize", onViewport);
-      window.visualViewport?.removeEventListener("scroll", onViewport);
-      document.documentElement.style.removeProperty("--keyboard-inset");
     };
   }, [editor]);
 

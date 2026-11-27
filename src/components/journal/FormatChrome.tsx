@@ -5,7 +5,6 @@ import type { Editor } from "@tiptap/core";
 import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { placeFormatPill } from "@/lib/format-chrome";
-import { toolbarShiftPx } from "@/lib/mobile-viewport";
 import {
   TEXT_STYLES,
   applyBlockStyle,
@@ -41,8 +40,6 @@ export default function FormatChrome({
   const [blockOpen, setBlockOpen] = useState(false);
   const [, setFrame] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
-  const anchorRef = useRef<HTMLDivElement>(null);
-  const shiftRef = useRef(0);
 
   const selectionEmpty = editor.state.selection.empty;
 
@@ -115,53 +112,6 @@ export default function FormatChrome({
     };
   }, [focused, panelOpen, aaExpanded, blockOpen, editor]);
 
-  useEffect(() => {
-    if (!focused || !selectionEmpty) {
-      shiftRef.current = 0;
-      return;
-    }
-    const pin = () => {
-      const anchor = anchorRef.current;
-      const viewport = window.visualViewport;
-      if (!anchor || !viewport) return;
-      const column = editor.view.dom.closest(".journal-editor")?.getBoundingClientRect();
-      const safeRight = safeArea("right");
-      const columnGap = column ? viewport.width - column.right : 0;
-      anchor.style.right = `${Math.max(16, columnGap + 16, safeRight)}px`;
-      const cardEndsOnScreen = !!column && column.bottom <= viewport.height - 8;
-      if (cardEndsOnScreen) {
-        shiftRef.current = 0;
-        anchor.style.bottom = "auto";
-        anchor.style.transform = "";
-        anchor.style.top = `${viewport.offsetTop + column.bottom - 16 - anchor.offsetHeight}px`;
-        return;
-      }
-      anchor.style.top = "auto";
-      anchor.style.bottom = "max(1rem, env(safe-area-inset-bottom, 0px))";
-      const next = toolbarShiftPx(
-        anchor.getBoundingClientRect().bottom + shiftRef.current,
-        viewport.height,
-        16 + safeArea("bottom")
-      );
-      if (next === shiftRef.current) return;
-      shiftRef.current = next;
-      anchor.style.transform = next ? `translate3d(0, ${-next}px, 0)` : "";
-    };
-    pin();
-    const id = requestAnimationFrame(pin);
-    window.visualViewport?.addEventListener("resize", pin);
-    window.visualViewport?.addEventListener("scroll", pin);
-    window.addEventListener("resize", pin);
-    window.addEventListener("scroll", pin, true);
-    return () => {
-      cancelAnimationFrame(id);
-      window.visualViewport?.removeEventListener("resize", pin);
-      window.visualViewport?.removeEventListener("scroll", pin);
-      window.removeEventListener("resize", pin);
-      window.removeEventListener("scroll", pin, true);
-    };
-  }, [focused, selectionEmpty, aaExpanded, blockOpen, editor]);
-
   if (!focused || suppressed) return null;
 
   const style = currentTextStyle(editor);
@@ -207,13 +157,9 @@ export default function FormatChrome({
 
   return (
     <div
-      ref={(node) => {
-        rootRef.current = node;
-        anchorRef.current = node;
-      }}
+      ref={rootRef}
       data-format-chrome={aaExpanded ? "aa-expanded" : "aa"}
-      data-format-anchor=""
-      className="fixed z-30 flex items-end motion-safe:transition-opacity"
+      className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 flex items-end motion-safe:transition-opacity"
     >
       {aaExpanded ? (
         <div className="relative flex items-center">
@@ -381,8 +327,6 @@ function selectionPlacement(editor: Editor, panelOpen: boolean) {
   const viewport = window.visualViewport;
   const width = viewport?.width ?? window.innerWidth;
   const height = viewport?.height ?? window.innerHeight;
-  const offsetTop = viewport?.offsetTop ?? 0;
-  const offsetLeft = viewport?.offsetLeft ?? 0;
   try {
     const from = editor.view.coordsAtPos(editor.state.selection.from);
     const to = editor.view.coordsAtPos(editor.state.selection.to);
@@ -395,27 +339,8 @@ function selectionPlacement(editor: Editor, panelOpen: boolean) {
       pillWidth: panelOpen ? 208 : 112,
       pillHeight: panelOpen ? 0 : 44,
       panelHeight: panelOpen ? 320 : 0,
-      offsetTop,
-      offsetLeft,
     });
   } catch {
-    return { top: offsetTop + 8, left: offsetLeft + 8, above: false };
+    return { top: 8, left: 8, above: false };
   }
-}
-
-function safeArea(edge: "bottom" | "right") {
-  const probe = document.createElement("div");
-  probe.style.position = "fixed";
-  probe.style.visibility = "hidden";
-  if (edge === "bottom") {
-    probe.style.paddingBottom = "env(safe-area-inset-bottom, 0px)";
-  } else {
-    probe.style.paddingRight = "env(safe-area-inset-right, 0px)";
-  }
-  document.body.appendChild(probe);
-  const style = getComputedStyle(probe);
-  const value =
-    Number.parseFloat(edge === "bottom" ? style.paddingBottom : style.paddingRight) || 0;
-  probe.remove();
-  return value;
 }

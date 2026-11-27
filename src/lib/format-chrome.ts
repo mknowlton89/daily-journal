@@ -43,18 +43,3 @@ export function placeFormatPill({
     above,
   };
 }
-
-/** Scroll the caret up when it sits on the floating Aa control. */
-export function caretOverlapScroll(
-  caret: { top: number; bottom: number; left: number; right: number },
-  obstacle: { top: number; bottom: number; left: number; right: number } | null,
-  padding = 12
-) {
-  if (!obstacle) return 0;
-  const vertical =
-    caret.bottom > obstacle.top - padding && caret.top < obstacle.bottom + padding;
-  const horizontal =
-    caret.right > obstacle.left - padding && caret.left < obstacle.right + padding;
-  if (!vertical || !horizontal) return 0;
-  return Math.ceil(caret.bottom - (obstacle.top - padding));
-}
