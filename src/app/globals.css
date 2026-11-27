@@ -144,7 +144,7 @@ html.dark {
 }
 
 .journal-editor {
-  padding-bottom: calc(5rem + var(--keyboard-inset, 0px) + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
 }
 
 .journal-editor .tiptap .journal-prompt p {
