@@ -95,6 +95,7 @@ export default function SignUpPage() {
                     id="name"
                     type="text"
                     required
+                    maxLength={80}
                     autoFocus
                     disabled={loading}
                     value={formData.name}
@@ -107,6 +108,7 @@ export default function SignUpPage() {
                     id="email"
                     type="email"
                     required
+                    maxLength={254}
                     disabled={loading}
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -118,6 +120,7 @@ export default function SignUpPage() {
                     id="password"
                     type="password"
                     required
+                    minLength={10}
                     disabled={loading}
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}

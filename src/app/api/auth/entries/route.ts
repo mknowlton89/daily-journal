@@ -4,6 +4,7 @@ import {
   listEntries,
 } from "@/app/lib/models/EntryModel";
 import { isValidDateKey } from "@/lib/dates";
+import { sanitizeEntryDocument } from "@/lib/entry-document";
 import { withAuthAndDB } from "@/lib/with-auth-and-db";
 
 export const GET = withAuthAndDB(async (session: Session) => {
@@ -24,7 +25,7 @@ export const POST = withAuthAndDB(
     }
 
     const body = await request.json();
-    const entryDate = typeof body.entryDate === "string" ? body.entryDate : "";
+    const entryDate = typeof body?.entryDate === "string" ? body.entryDate : "";
     if (!isValidDateKey(entryDate)) {
       return Response.json(
         { error: "A valid entryDate (YYYY-MM-DD) is required" },
@@ -32,8 +33,14 @@ export const POST = withAuthAndDB(
       );
     }
 
-    const hasText = body.hasText === true;
-    const entry = await createEntryForDate(userId, entryDate, body.content, hasText);
+    const content = sanitizeEntryDocument(body?.content);
+    if (!content) {
+      return Response.json(
+        { error: "Entry content is invalid or too large" },
+        { status: 400 }
+      );
+    }
+    const entry = await createEntryForDate(userId, entryDate, content);
     return Response.json(entry, { status: 201 });
   }
 );

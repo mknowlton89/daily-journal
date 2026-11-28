@@ -11,7 +11,6 @@ import {
   parseEntryDateKey,
 } from "@/lib/dates";
 import { buildPreview, extractPlainText, highlightParts, type RichTextNode } from "@/lib/entry-text";
-import { openEntryContent } from "@/lib/content-key";
 import { useApi } from "@/lib/hooks/useApi";
 import AccountMenu from "./AccountMenu";
 import { useClientToday } from "./use-client-today";
@@ -26,11 +25,6 @@ export default function EntriesIndex() {
   const today = useClientToday();
   const [query, setQuery] = useState("");
   const [deferred, setDeferred] = useState("");
-  const [opened, setOpened] = useState<{
-    key: string;
-    rows: { entry: StoredEntry; text: string }[];
-  } | null>(null);
-  const [openError, setOpenError] = useState(false);
 
   useEffect(() => {
     const timeout = setTimeout(() => setDeferred(query.trim()), 200);
@@ -38,32 +32,12 @@ export default function EntriesIndex() {
   }, [query]);
 
   const { data, error, isLoading } = useApi<StoredEntry[]>("/api/auth/entries");
-  const dataKey = (data ?? [])
-    .map((entry) => `${entry.id}:${String(entry.dateUpdated)}`)
-    .join("|");
+  const rows = (data ?? []).map((entry) => ({
+    entry,
+    text: extractPlainText(entry.content as RichTextNode),
+  }));
 
-  useEffect(() => {
-    if (!data) return;
-    let cancelled = false;
-    Promise.all(
-      data.map(async (entry) => {
-        const doc = await openEntryContent(entry.content);
-        return { entry, text: extractPlainText(doc as RichTextNode) };
-      })
-    )
-      .then((rows) => {
-        if (!cancelled) setOpened({ key: dataKey, rows });
-      })
-      .catch(() => {
-        if (!cancelled) setOpenError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [data, dataKey]);
-
-  const ready = opened?.key === dataKey ? opened.rows : null;
-  const visible = (ready ?? []).filter((row) => {
+  const visible = rows.filter((row) => {
     if (!deferred) return true;
     return row.text.toLowerCase().includes(deferred.toLowerCase());
   });
@@ -113,7 +87,7 @@ export default function EntriesIndex() {
           />
         </label>
 
-        {deferred && ready && (
+        {deferred && data && (
           <p className={`${journalMutedClass} mt-4 text-sm`}>
             {summaries.length === 0
               ? `No entries match “${deferred}”`
@@ -121,9 +95,9 @@ export default function EntriesIndex() {
           </p>
         )}
 
-        {isLoading || (data && !ready && !openError) ? (
+        {isLoading ? (
           <p className={`${journalMutedClass} mt-8 text-sm`}>Loading…</p>
-        ) : error || openError ? (
+        ) : error ? (
           <p className={`${journalMutedClass} mt-8 text-sm`}>
             Couldn’t load entries.
           </p>

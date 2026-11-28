@@ -4,6 +4,7 @@ import {
   getEntryById,
   updateEntry,
 } from "@/app/lib/models/EntryModel";
+import { sanitizeEntryDocument } from "@/lib/entry-document";
 import { withAuthAndDB } from "@/lib/with-auth-and-db";
 
 export const GET = withAuthAndDB(
@@ -40,7 +41,17 @@ export const PUT = withAuthAndDB(
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
     const body = await request.json();
-    const entry = await updateEntry(id, userId, body.content, body.hasText === true);
+    const content = sanitizeEntryDocument(body?.content);
+    if (!content) {
+      return Response.json(
+        { error: "Entry content is invalid or too large" },
+        { status: 400 }
+      );
+    }
+    const entry = await updateEntry(id, userId, content);
+    if (!entry) {
+      return Response.json({ error: "Entry not found" }, { status: 404 });
+    }
     return Response.json(entry, { status: 200 });
   }
 );

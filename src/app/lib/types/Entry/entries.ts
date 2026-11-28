@@ -1,5 +1,4 @@
 import { JSONContent } from "@tiptap/react";
-import type { SealedContent } from "@/lib/content-cipher";
 
 export interface EntryInterface {
   id: string;
@@ -7,7 +6,7 @@ export interface EntryInterface {
   dateUpdated: Date;
   entryDate: string;
   userId: string;
-  content?: JSONContent | SealedContent;
+  content?: JSONContent;
 }
 
 export interface EntryNeighbor {
@@ -26,7 +25,7 @@ export interface StoredEntry {
   id: string;
   entryDate: string;
   dateUpdated: Date | string | null;
-  content?: JSONContent | SealedContent;
+  content?: JSONContent;
 }
 
 export interface EntrySummary {

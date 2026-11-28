@@ -9,7 +9,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn, SignInResponse } from "next-auth/react";
 import Link from "next/link";
 import { journalMutedClass, journalShellClass } from "@/components/journal/shell";
@@ -25,6 +25,14 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    const authError = new URLSearchParams(window.location.search).get("error");
+    if (authError === "AccessDenied") {
+      setEmailOpen(true);
+      setError("Google couldn’t be used for this email. Sign in with email and password if you already have an account.");
+    }
+  }, []);
 
   const handleSubmit = async () => {
     setLoading(true);

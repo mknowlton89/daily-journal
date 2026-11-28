@@ -1,9 +1,26 @@
 import type { NextAuthOptions } from "next-auth";
+import type { Profile } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { createUser, getUserByEmail } from "../app/lib/models/UserModel";
 import { connectDB } from "../app/lib/mongodb";
+import {
+  googleSignInDecision,
+  normalizeEmail,
+  normalizeName,
+  readPassword,
+} from "./auth-input";
+
+type GoogleProfile = Profile & { email_verified?: boolean };
+
+function accountUser(user: { id: string; email: string; name?: string | null }) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name ?? null,
+  };
+}
 
 export const authOptions: NextAuthOptions = {
   session: {
@@ -22,15 +39,15 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         try {
+          const email = normalizeEmail(credentials?.email);
+          const password = readPassword(credentials?.password);
+          if (!email || !password) return null;
           await connectDB();
-          const user = await getUserByEmail(credentials?.email ?? "");
+          const user = await getUserByEmail(email);
           if (!user?.password) return null;
-          const isValidPassword = await bcrypt.compare(
-            credentials?.password ?? "",
-            user.password
-          );
+          const isValidPassword = await bcrypt.compare(password, user.password);
           if (!isValidPassword) return null;
-          return user;
+          return accountUser(user);
         } catch {
           return null;
         }
@@ -40,13 +57,17 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ account, profile }) {
       if (account?.provider !== "google") return true;
-      const email = profile?.email;
+      const googleProfile = profile as GoogleProfile | undefined;
+      if (googleProfile?.email_verified === false) return false;
+      const email = normalizeEmail(googleProfile?.email);
       if (!email) return false;
       await connectDB();
       const existingUser = await getUserByEmail(email);
-      if (!existingUser) {
+      const decision = googleSignInDecision(existingUser);
+      if (decision === "deny") return false;
+      if (decision === "create") {
         await createUser({
-          name: profile.name ?? "",
+          name: normalizeName(googleProfile?.name) ?? "",
           email,
         });
       }
