@@ -45,6 +45,7 @@ import { loadContentKey } from "@/lib/content-key";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
 import FormatChrome from "@/components/journal/FormatChrome";
 import { applyBlockStyle, currentTextStyle } from "@/components/journal/format-commands";
+import { placePopover, revealCaret } from "@/lib/caret-anchor";
 import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
@@ -78,17 +79,11 @@ type SlashMenuState = SlashMatch & {
 function slashPosition(
   editor: NonNullable<ReturnType<typeof useEditor>>,
   pos: number,
+  mode: SlashMenuState["mode"],
   itemCount: number
 ) {
-  const coords = editor.view.coordsAtPos(pos);
-  const menuHeight = Math.max(itemCount, 1) * 34 + 12;
-  const left = Math.max(8, Math.min(coords.left, window.innerWidth - 196));
-  const visibleHeight = window.visualViewport?.height ?? window.innerHeight;
-  const spaceBelow = visibleHeight - coords.bottom;
-  if (spaceBelow < menuHeight + 80) {
-    return { top: Math.max(8, coords.top - menuHeight - 8), left };
-  }
-  return { top: coords.bottom + 8, left };
+  if (mode !== "commands") return placePopover(editor.view, pos, 320, 280);
+  return placePopover(editor.view, pos, 200, Math.max(itemCount, 1) * 48 + 8);
 }
 
 const EntryCard = forwardRef<
@@ -224,9 +219,15 @@ const EntryCard = forwardRef<
     }
 
     const previous = slashMenuRef.current;
+    const mode =
+      previous && previous.from === match.from && previous.mode !== "commands"
+        ? previous.mode
+        : "commands";
     let position = { top: 8, left: 8 };
     try {
-      position = slashPosition(current, match.to, 6);
+      const count =
+        mode === "commands" ? filterSlashCommands(match.query).length : 1;
+      position = slashPosition(current, match.to, mode, count);
     } catch {
       position = { top: 8, left: 8 };
     }
@@ -319,6 +320,12 @@ const EntryCard = forwardRef<
     ],
     autofocus: "end",
     immediatelyRender: true,
+    editorProps: {
+      handleScrollToSelection(view) {
+        revealCaret(view);
+        return true;
+      },
+    },
     onUpdate: () => {
       scheduleRef.current();
     },
@@ -331,6 +338,18 @@ const EntryCard = forwardRef<
 
   useEffect(() => {
     editorRef.current = editor;
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editor) return;
+    const refresh = () => revealCaret(editor.view);
+    editor.on("focus", refresh);
+    window.visualViewport?.addEventListener("resize", refresh);
+    return () => {
+      editor.off("focus", refresh);
+      window.visualViewport?.removeEventListener("resize", refresh);
+      document.documentElement.style.removeProperty("--keyboard-overlap");
+    };
   }, [editor]);
 
   if (editor) prompts.bindEditor(editor);
@@ -598,7 +617,7 @@ const EntryCard = forwardRef<
       )}
       {slashMenu && promptPicker && (
         <div
-          className="fixed z-40"
+          className="absolute z-40"
           style={{ top: slashMenu.top, left: slashMenu.left }}
         >
           <PromptMenu

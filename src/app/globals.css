@@ -143,8 +143,13 @@ html.dark {
   font-family: var(--font-newsreader), Georgia, "Times New Roman", serif;
 }
 
+html {
+  scroll-padding-top: 3.5rem;
+  scroll-padding-bottom: calc(var(--keyboard-overlap, 0px) + 4.5rem);
+}
+
 .journal-editor {
-  padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--keyboard-overlap, 0px) + 5.5rem + env(safe-area-inset-bottom, 0px));
 }
 
 .journal-editor .tiptap .journal-prompt p {

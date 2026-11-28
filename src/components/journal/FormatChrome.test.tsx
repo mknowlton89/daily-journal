@@ -75,29 +75,33 @@ describe("FormatChrome", () => {
     view.destroy();
   });
 
-  it("shows Aa for a focused empty selection and the Format pill for a range", () => {
+  it("shows the Format pill only while text is selected", () => {
     const view = mount(true);
-    expect(chrome()?.getAttribute("data-format-chrome")).toBe("aa");
+    expect(chrome()).toBeNull();
 
     act(() => {
       view.editor.commands.setTextSelection({ from: 1, to: 6 });
     });
     expect(chrome()?.getAttribute("data-format-chrome")).toBe("pill");
     expect(chrome()?.textContent).toContain("Format");
+    expect(document.body.textContent).not.toContain("Aa");
 
     act(() => {
       view.editor.commands.setTextSelection(1);
     });
-    expect(chrome()?.getAttribute("data-format-chrome")).toBe("aa");
+    expect(chrome()).toBeNull();
     view.destroy();
   });
 
   it("applies inline and block commands without taking focus on pointer down", () => {
     const view = mount(true);
-    const aa = document.querySelector('[aria-label="Formatting"]');
-    if (!(aa instanceof HTMLButtonElement)) throw new Error("missing Aa");
     act(() => {
-      aa.click();
+      view.editor.commands.setTextSelection({ from: 1, to: 6 });
+    });
+    const format = document.querySelector('[aria-label="Formatting"]');
+    if (!(format instanceof HTMLButtonElement)) throw new Error("missing Format");
+    act(() => {
+      format.click();
     });
 
     const bold = document.querySelector('[aria-label="Bold"]');
@@ -118,11 +122,6 @@ describe("FormatChrome", () => {
     expect(view.editor.isActive("underline")).toBe(true);
     expect(view.editor.isActive("strike")).toBe(true);
 
-    const block = document.querySelector('[aria-label="Block type"]');
-    if (!(block instanceof HTMLButtonElement)) throw new Error("missing block type");
-    act(() => {
-      block.click();
-    });
     const heading = Array.from(document.querySelectorAll('[role="option"]')).find(
       (option) => option.textContent?.includes("Heading 1")
     );

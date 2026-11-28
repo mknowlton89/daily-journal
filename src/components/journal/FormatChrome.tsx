@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
-import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { placePopover } from "@/lib/caret-anchor";
 import { cn } from "@/lib/utils";
-import { placeFormatPill } from "@/lib/format-chrome";
 import {
   TEXT_STYLES,
   applyBlockStyle,
@@ -35,73 +35,44 @@ export default function FormatChrome({
   focused: boolean;
   suppressed?: boolean;
 }) {
-  const [aaExpanded, setAaExpanded] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
-  const [blockOpen, setBlockOpen] = useState(false);
   const [, setFrame] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
-
   const selectionEmpty = editor.state.selection.empty;
 
   useEffect(() => {
     const refresh = () => {
       if (editor.state.selection.empty) setPanelOpen(false);
-      else {
-        setAaExpanded(false);
-        setBlockOpen(false);
-      }
       setFrame((frame) => frame + 1);
     };
     editor.on("selectionUpdate", refresh);
     editor.on("transaction", refresh);
+    window.visualViewport?.addEventListener("resize", refresh);
     return () => {
       editor.off("selectionUpdate", refresh);
       editor.off("transaction", refresh);
+      window.visualViewport?.removeEventListener("resize", refresh);
     };
   }, [editor]);
 
   useEffect(() => {
     if (!focused) return;
-    const refresh = () => setFrame((frame) => frame + 1);
-    window.addEventListener("scroll", refresh, true);
-    window.addEventListener("resize", refresh);
-    window.visualViewport?.addEventListener("resize", refresh);
-    window.visualViewport?.addEventListener("scroll", refresh);
-    return () => {
-      window.removeEventListener("scroll", refresh, true);
-      window.removeEventListener("resize", refresh);
-      window.visualViewport?.removeEventListener("resize", refresh);
-      window.visualViewport?.removeEventListener("scroll", refresh);
-    };
-  }, [focused]);
-
-  useEffect(() => {
-    if (!focused) return;
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setPanelOpen(false);
-        setBlockOpen(false);
-        setAaExpanded(false);
-      }
+      if (!rootRef.current?.contains(event.target as Node)) setPanelOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
       const shortcut =
         (event.metaKey || event.ctrlKey) &&
         event.shiftKey &&
         event.key.toLowerCase() === "f";
-      if (shortcut) {
+      if (shortcut && !editor.state.selection.empty) {
         event.preventDefault();
-        if (editor.state.selection.empty) setAaExpanded(true);
-        else setPanelOpen(true);
-        rootRef.current?.querySelector<HTMLElement>("[data-format-focus]")?.focus();
+        setPanelOpen(true);
         return;
       }
-      if (event.key !== "Escape") return;
-      if (!panelOpen && !aaExpanded && !blockOpen) return;
+      if (event.key !== "Escape" || !panelOpen) return;
       event.preventDefault();
       setPanelOpen(false);
-      setBlockOpen(false);
-      setAaExpanded(false);
       editor.commands.focus();
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -110,99 +81,29 @@ export default function FormatChrome({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [focused, panelOpen, aaExpanded, blockOpen, editor]);
+  }, [focused, panelOpen, editor]);
 
-  if (!focused || suppressed) return null;
+  if (!focused || suppressed || selectionEmpty) return null;
 
   const style = currentTextStyle(editor);
-
-  if (!selectionEmpty) {
-    const placement = selectionPlacement(editor, panelOpen);
-    return (
-      <div
-        ref={rootRef}
-        data-format-chrome={panelOpen ? "panel" : "pill"}
-        className="fixed z-30 motion-safe:transition-opacity"
-        style={{ top: placement.top, left: placement.left }}
-      >
-        {panelOpen ? (
-          <FormatPanel
-            editor={editor}
-            style={style}
-            onClose={() => {
-              setPanelOpen(false);
-              editor.commands.focus();
-            }}
-          />
-        ) : (
-          <button
-            type="button"
-            data-format-focus
-            aria-label="Formatting"
-            aria-expanded={false}
-            onPointerDown={keepFocus}
-            onClick={() => setPanelOpen(true)}
-            className={cn(
-              surfaceClass,
-              "flex min-h-11 cursor-pointer items-center gap-1 rounded-full px-3 text-sm"
-            )}
-          >
-            Format
-            <ChevronDownIcon className="size-4 opacity-60" />
-          </button>
-        )}
-      </div>
-    );
-  }
+  const placement = selectionPlacement(editor, panelOpen);
 
   return (
     <div
       ref={rootRef}
-      data-format-chrome={aaExpanded ? "aa-expanded" : "aa"}
-      className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[max(1rem,env(safe-area-inset-bottom))] z-30 flex items-end motion-safe:transition-opacity"
+      data-format-chrome={panelOpen ? "panel" : "pill"}
+      className="absolute z-30"
+      style={{ top: placement.top, left: placement.left }}
     >
-      {aaExpanded ? (
-        <div className="relative flex items-center">
-          {blockOpen && (
-            <div className="absolute right-0 bottom-full mb-2">
-              <BlockTypeList
-                editor={editor}
-                style={style}
-                onPick={() => setBlockOpen(false)}
-              />
-            </div>
-          )}
-          <div className={cn(surfaceClass, "flex items-center rounded-full p-1")}>
-            <button
-              type="button"
-              data-format-focus
-              aria-label="Block type"
-              aria-expanded={blockOpen}
-              onPointerDown={keepFocus}
-              onClick={() => setBlockOpen((open) => !open)}
-              className="flex size-11 cursor-pointer items-center justify-center gap-0.5 rounded-full text-sm"
-            >
-              ¶
-              <ChevronDownIcon className="size-3.5 opacity-60" />
-            </button>
-            {MARKS.map((item) => (
-              <MarkButton key={item.mark} editor={editor} {...item} />
-            ))}
-            <button
-              type="button"
-              aria-label="Close formatting"
-              onPointerDown={keepFocus}
-              onClick={() => {
-                setAaExpanded(false);
-                setBlockOpen(false);
-                editor.commands.focus();
-              }}
-              className="flex size-11 cursor-pointer items-center justify-center rounded-full text-[#8a847a]"
-            >
-              <XIcon className="size-4" />
-            </button>
-          </div>
-        </div>
+      {panelOpen ? (
+        <FormatPanel
+          editor={editor}
+          style={style}
+          onClose={() => {
+            setPanelOpen(false);
+            editor.commands.focus();
+          }}
+        />
       ) : (
         <button
           type="button"
@@ -210,13 +111,14 @@ export default function FormatChrome({
           aria-label="Formatting"
           aria-expanded={false}
           onPointerDown={keepFocus}
-          onClick={() => setAaExpanded(true)}
+          onClick={() => setPanelOpen(true)}
           className={cn(
             surfaceClass,
-            "flex size-11 cursor-pointer items-center justify-center rounded-full text-sm"
+            "flex min-h-11 cursor-pointer items-center gap-1 rounded-full px-3 text-sm"
           )}
         >
-          Aa
+          Format
+          <ChevronDownIcon className="size-4 opacity-60" />
         </button>
       )}
     </div>
@@ -233,16 +135,12 @@ function FormatPanel({
   onClose: () => void;
 }) {
   return (
-        <div
-          role="region"
-          aria-label="Formatting"
-          className={cn(surfaceClass, "w-52 rounded-xl p-1")}
-        >
-      <BlockTypeList
-        editor={editor}
-        style={style}
-        onPick={onClose}
-      />
+    <div
+      role="region"
+      aria-label="Formatting"
+      className={cn(surfaceClass, "w-52 rounded-xl p-1")}
+    >
+      <BlockTypeList editor={editor} style={style} onPick={onClose} />
       <div className="mx-2 my-1 h-px bg-black/10 dark:bg-white/15" />
       <div className="flex items-center justify-between px-1">
         {MARKS.map((item) => (
@@ -324,23 +222,23 @@ function MarkButton({
 }
 
 function selectionPlacement(editor: Editor, panelOpen: boolean) {
-  const viewport = window.visualViewport;
-  const width = viewport?.width ?? window.innerWidth;
-  const height = viewport?.height ?? window.innerHeight;
   try {
-    const from = editor.view.coordsAtPos(editor.state.selection.from);
-    const to = editor.view.coordsAtPos(editor.state.selection.to);
-    return placeFormatPill({
-      selectionTop: Math.min(from.top, to.top),
-      selectionBottom: Math.max(from.bottom, to.bottom),
-      selectionLeft: Math.min(from.left, to.left),
-      viewportWidth: width,
-      viewportHeight: height,
-      pillWidth: panelOpen ? 208 : 112,
-      pillHeight: panelOpen ? 0 : 44,
-      panelHeight: panelOpen ? 320 : 0,
-    });
+    const start = editor.view.coordsAtPos(editor.state.selection.from);
+    const end = editor.view.coordsAtPos(editor.state.selection.to);
+    return placePopover(
+      {
+        dom: editor.view.dom,
+        coordsAtPos: () => ({
+          top: Math.min(start.top, end.top),
+          bottom: Math.max(start.bottom, end.bottom),
+          left: Math.min(start.left, end.left),
+        }),
+      },
+      0,
+      panelOpen ? 208 : 112,
+      panelOpen ? 280 : 44
+    );
   } catch {
-    return { top: 8, left: 8, above: false };
+    return { top: 8, left: 8 };
   }
 }
