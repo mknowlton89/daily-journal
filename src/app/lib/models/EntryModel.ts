@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
 import uniqid from "uniqid";
 import { JSONContent } from "@tiptap/react";
-import { encryptContent, isSealedContent, type SealedContent } from "@/lib/content-cipher";
+import { isSealedContent } from "@/lib/content-cipher";
 import { formatEntryDateKey } from "@/lib/dates";
 import { extractPlainText, RichTextNode } from "@/lib/entry-text";
+import { sanitizeEntryDocument } from "@/lib/entry-document";
+import { openForUser, sealForUser } from "@/lib/entry-seal";
 import { EntryInterface, EntryNeighbor, StoredEntry } from "../types/Entry/entries";
 
 const EntrySchema = new mongoose.Schema({
@@ -48,14 +50,19 @@ type EntryRecord = {
 
 const withText = { hasText: true };
 
-function serializeEntry(entry: EntryRecord): EntryInterface {
+async function serializeEntry(userId: string, entry: EntryRecord): Promise<EntryInterface> {
+  const content =
+    entry.content == null ? undefined : (await openForUser(userId, entry.content)) ?? undefined;
+  if (entry.content != null && !content) {
+    throw new Error("Entry content could not be opened");
+  }
   return {
     id: entry.id,
     dateCreated: entry.dateCreated ?? new Date(0),
     dateUpdated: entry.dateUpdated ?? new Date(0),
     entryDate: entry.entryDate ?? "",
-    userId: entry.userId ?? "",
-    content: entry.content as EntryInterface["content"],
+    userId: entry.userId ?? userId,
+    content,
   };
 }
 
@@ -77,7 +84,7 @@ async function sealStoredEntries(userId: string) {
       $or: [
         { plainText: { $exists: true } },
         { hasText: { $exists: false } },
-        { content: { $exists: true, $ne: null }, "content.sealed": { $ne: 1 } },
+        { content: { $exists: true, $ne: null }, "content.sealed": { $ne: 2 } },
       ],
     })
     .toArray()) as {
@@ -87,23 +94,19 @@ async function sealStoredEntries(userId: string) {
     hasText?: unknown;
   }[];
 
-  const key = process.env.ENTRY_CONTENT_KEY;
   for (const row of rows) {
-    const sealed = isSealedContent(row.content);
+    const version = isSealedContent(row.content) ? row.content.sealed : 0;
+    const plain = row.content == null ? null : await openForUser(userId, row.content);
+    if (row.content != null && !plain) {
+      throw new Error("Entry content could not be opened");
+    }
     const legacyText =
       typeof row.plainText === "string"
         ? row.plainText.trim()
-        : !sealed
-          ? extractPlainText(row.content as RichTextNode | string | null).trim()
-          : "";
-    const hasText =
-      typeof row.plainText === "string" || !sealed
-        ? legacyText.length > 0
-        : row.hasText === true;
-    const $set: Record<string, unknown> = { hasText };
-    if (row.content != null && !sealed) {
-      if (!key) throw new Error("ENTRY_CONTENT_KEY is not configured");
-      $set.content = await encryptContent(row.content as JSONContent, key);
+        : extractPlainText(plain as RichTextNode | null).trim();
+    const $set: Record<string, unknown> = { hasText: legacyText.length > 0 };
+    if (plain && version !== 2) {
+      $set.content = await sealForUser(userId, plain);
     }
     await Entry.collection.updateOne(
       { _id: row._id as mongoose.Types.ObjectId },
@@ -157,7 +160,7 @@ export async function getDayContext(userId: string, entryDate: string) {
 
   return {
     date: entryDate,
-    entry: entry ? serializeEntry(entry) : null,
+    entry: entry ? await serializeEntry(userId, entry) : null,
     previous: serializeNeighbor(previous),
     next: serializeNeighbor(next),
   };
@@ -177,77 +180,89 @@ export async function listEntries(userId: string): Promise<StoredEntry[]> {
   for (const entry of entries) {
     if (!entry.entryDate || seen.has(entry.entryDate)) continue;
     seen.add(entry.entryDate);
+    const opened = await serializeEntry(userId, entry);
     stored.push({
       id: entry.id,
       entryDate: entry.entryDate,
       dateUpdated: entry.dateUpdated ?? null,
-      content: entry.content as StoredEntry["content"],
+      content: opened.content,
     });
   }
 
   return stored;
 }
 
+function entryHasText(content: JSONContent) {
+  return extractPlainText(content as RichTextNode).trim().length > 0;
+}
+
+function requireEntryDocument(content: JSONContent) {
+  const clean = sanitizeEntryDocument(content);
+  if (!clean) throw new Error("Entry content is invalid or too large");
+  return clean;
+}
+
 export async function createEntryForDate(
   userId: string,
   entryDate: string,
-  content?: JSONContent | SealedContent,
-  hasText = false
+  content: JSONContent
 ) {
-  const writing = hasText === true;
+  const clean = requireEntryDocument(content);
+  const sealed = await sealForUser(userId, clean);
+  const hasText = entryHasText(clean);
   const existing = await Entry.findOne({ userId, entryDate }).sort({
     dateUpdated: -1,
   });
 
   if (existing) {
-    if (content) {
-      await Entry.collection.updateOne(
-        { _id: existing._id },
-        {
-          $set: { content, hasText: writing, dateUpdated: new Date() },
-          $unset: { plainText: "" },
-        }
-      );
-      existing.content = content;
-      existing.dateUpdated = new Date();
-    }
-    return serializeEntry(existing);
+    await Entry.collection.updateOne(
+      { _id: existing._id },
+      {
+        $set: { content: sealed, hasText, dateUpdated: new Date() },
+        $unset: { plainText: "" },
+      }
+    );
+    existing.content = sealed;
+    existing.dateUpdated = new Date();
+    existing.hasText = hasText;
+    return serializeEntry(userId, existing);
   }
 
   const created = await Entry.create({
     id: uniqid(),
     userId,
     entryDate,
-    content,
-    hasText: writing,
+    content: sealed,
+    hasText,
     dateCreated: new Date(),
     dateUpdated: new Date(),
   });
 
-  return serializeEntry(created);
+  return serializeEntry(userId, created);
 }
 
-export function getEntryById(id: string, userId: string) {
-  return Entry.findOne({ id, userId });
+export async function getEntryById(id: string, userId: string) {
+  const entry = await Entry.findOne({ id, userId }).lean<EntryRecord | null>();
+  if (!entry) return null;
+  return serializeEntry(userId, entry);
 }
 
-export function updateEntry(
-  id: string,
-  userId: string,
-  content: JSONContent | SealedContent,
-  hasText = false
-) {
-  return Entry.collection.updateOne(
+export async function updateEntry(id: string, userId: string, content: JSONContent) {
+  const clean = requireEntryDocument(content);
+  const sealed = await sealForUser(userId, clean);
+  const updated = await Entry.collection.updateOne(
     { id, userId },
     {
       $set: {
-        content,
-        hasText: hasText === true,
+        content: sealed,
+        hasText: entryHasText(clean),
         dateUpdated: new Date(),
       },
       $unset: { plainText: "" },
     }
   );
+  if (updated.matchedCount === 0) return null;
+  return getEntryById(id, userId);
 }
 
 export function deleteEntry(id: string, userId: string) {

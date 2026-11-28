@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import uniqid from "uniqid";
+import { normalizeEmail } from "@/lib/auth-input";
 import { UserInterface } from "../types/users";
 
 const UserSchema = new mongoose.Schema({
@@ -23,8 +24,31 @@ const UserSchema = new mongoose.Schema({
 
 const User = mongoose.models.User || mongoose.model("User", UserSchema);
 
-export function getUserByEmail(email: string) {
-  return User.findOne({ email });
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export async function getUserByEmail(email: string) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+
+  const exact = await User.findOne({ email: normalized });
+  if (exact) return exact;
+
+  const matches = await User.find({
+    email: { $regex: `^${escapeRegex(normalized)}$`, $options: "i" },
+  }).limit(2);
+  if (matches.length !== 1) return null;
+
+  const legacy = matches[0];
+  if (legacy.email !== normalized) {
+    const taken = await User.findOne({ email: normalized });
+    if (!taken) {
+      legacy.email = normalized;
+      await legacy.save();
+    }
+  }
+  return legacy;
 }
 
 export function createUser(

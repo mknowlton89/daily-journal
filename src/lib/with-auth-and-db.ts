@@ -85,10 +85,7 @@ export function withAuthAndDB(
       }
     } catch (error) {
       console.error("API route error:", error);
-      return Response.json(
-        { message: "Internal server error", error: String(error) },
-        { status: 500 }
-      );
+      return Response.json({ message: "Internal server error" }, { status: 500 });
     }
   };
 }

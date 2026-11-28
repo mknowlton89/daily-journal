@@ -40,8 +40,6 @@ import {
 import { PromptDeletedToast, PromptMenu } from "@/components/journal/prompt-menu";
 import { EmptyEntryHint } from "@/components/journal/EmptyEntryHint";
 import { usePromptLibrary } from "@/components/journal/use-prompt-library";
-import { encryptContent } from "@/lib/content-cipher";
-import { loadContentKey } from "@/lib/content-key";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
 import FormatChrome from "@/components/journal/FormatChrome";
 import { applyBlockStyle, currentTextStyle } from "@/components/journal/format-commands";
@@ -152,15 +150,11 @@ const EntryCard = forwardRef<
 
       const doc = editorInstance.getJSON();
       try {
-        const text = extractPlainText(doc as RichTextNode);
-        const sealed = await encryptContent(doc, await loadContentKey());
-        const hasText = text.trim().length > 0;
         let id = entryIdRef.current;
         if (!id) {
           const created = await postApi<EntryInterface>("/api/auth/entries", {
             entryDate,
-            content: sealed,
-            hasText,
+            content: doc,
           });
           id = created.data.id;
           entryIdRef.current = id;
@@ -168,7 +162,7 @@ const EntryCard = forwardRef<
           const res = await fetch(`/api/auth/entries/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content: sealed, hasText }),
+            body: JSON.stringify({ content: doc }),
           });
           if (!res.ok) throw new Error("Failed to save entry");
         }

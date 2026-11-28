@@ -3,12 +3,28 @@ import type { NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 const AUTH_PAGES = ["/login", "/sign-up"];
+const PUBLIC_AUTH_PREFIXES = [
+  "/api/auth/signin",
+  "/api/auth/signout",
+  "/api/auth/callback",
+  "/api/auth/session",
+  "/api/auth/csrf",
+  "/api/auth/providers",
+  "/api/auth/error",
+  "/api/auth/_log",
+  "/api/auth/signup",
+];
+
+function isPublicAuthPath(pathname: string) {
+  return PUBLIC_AUTH_PREFIXES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+}
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Allow NextAuth internal routes to pass through
-  if (pathname.startsWith("/api/auth")) {
+  if (isPublicAuthPath(pathname)) {
     return NextResponse.next();
   }
 
@@ -19,7 +35,6 @@ export async function middleware(req: NextRequest) {
 
   const isLoggedIn = !!token;
 
-  // Handle API routes (except /api/auth which is already handled above)
   if (pathname.startsWith("/api")) {
     if (!isLoggedIn) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

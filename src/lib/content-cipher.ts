@@ -1,18 +1,44 @@
 import type { JSONContent } from "@tiptap/react";
 
 export type SealedContent = {
-  sealed: 1;
+  sealed: 1 | 2;
   iv: string;
   data: string;
 };
 
+const USER_KEY_SALT = "daily-journal-entry-v2";
+
 export function isSealedContent(value: unknown): value is SealedContent {
   if (!value || typeof value !== "object") return false;
   const record = value as { sealed?: unknown; iv?: unknown; data?: unknown };
-  return record.sealed === 1 && typeof record.iv === "string" && typeof record.data === "string";
+  return (
+    (record.sealed === 1 || record.sealed === 2) &&
+    typeof record.iv === "string" &&
+    typeof record.data === "string"
+  );
 }
 
-export async function encryptContent(content: JSONContent, key: string) {
+export async function deriveUserContentKey(masterKey: string, userId: string) {
+  if (!userId) throw new Error("A user id is required to derive an entry key");
+  const raw = decodeBase64(masterKey);
+  if (raw.byteLength !== 32) {
+    throw new Error("ENTRY_CONTENT_KEY must be 32 bytes of base64");
+  }
+  const baseKey = await crypto.subtle.importKey("raw", raw, "HKDF", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new TextEncoder().encode(USER_KEY_SALT),
+      info: new TextEncoder().encode(userId),
+    },
+    baseKey,
+    256
+  );
+  return encodeBase64(new Uint8Array(bits));
+}
+
+export async function encryptContent(content: JSONContent, key: string, sealed: 1 | 2 = 2) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const cipher = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
@@ -20,7 +46,7 @@ export async function encryptContent(content: JSONContent, key: string) {
     new TextEncoder().encode(JSON.stringify(content))
   );
   return {
-    sealed: 1 as const,
+    sealed,
     iv: encodeBase64(iv),
     data: encodeBase64(new Uint8Array(cipher)),
   };
