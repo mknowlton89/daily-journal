@@ -92,8 +92,13 @@ export default function FormatChrome({
     <div
       ref={rootRef}
       data-format-chrome={panelOpen ? "panel" : "pill"}
-      className="absolute z-30"
-      style={{ top: placement.top, left: placement.left }}
+      className="absolute z-30 overflow-y-auto"
+      style={{
+        top: placement.top,
+        bottom: placement.bottom,
+        left: placement.left,
+        maxHeight: placement.maxHeight,
+      }}
     >
       {panelOpen ? (
         <FormatPanel
@@ -235,10 +240,9 @@ function selectionPlacement(editor: Editor, panelOpen: boolean) {
         }),
       },
       0,
-      panelOpen ? 208 : 112,
-      panelOpen ? 280 : 44
+      panelOpen ? 208 : 112
     );
   } catch {
-    return { top: 8, left: 8 };
+    return { top: 8, left: 8, maxHeight: 240 };
   }
 }

@@ -43,7 +43,14 @@ import { usePromptLibrary } from "@/components/journal/use-prompt-library";
 import { extractPlainText, type RichTextNode } from "@/lib/entry-text";
 import FormatChrome from "@/components/journal/FormatChrome";
 import { applyBlockStyle, currentTextStyle } from "@/components/journal/format-commands";
-import { placePopover, revealCaret } from "@/lib/caret-anchor";
+import {
+  keyboardOverlap,
+  placePopover,
+  revealCaret,
+  setCaretPointerDown,
+  syncKeyboardOverlap,
+  type PopoverPlace,
+} from "@/lib/caret-anchor";
 import { composerState, pickerEndIndex, pickerHomeIndex, pickerRows, promptPlaceholder, showEmptyEntryHint } from "@/lib/prompts";
 
 export type EntryEditorHandle = {
@@ -66,22 +73,19 @@ function revalidateEntryList() {
   );
 }
 
-type SlashMenuState = SlashMatch & {
-  index: number;
-  top: number;
-  left: number;
-  mode: "commands" | "prompts" | "compose";
-  promptFilter: string;
-};
+type SlashMenuState = SlashMatch &
+  PopoverPlace & {
+    index: number;
+    mode: "commands" | "prompts" | "compose";
+    promptFilter: string;
+  };
 
 function slashPosition(
   editor: NonNullable<ReturnType<typeof useEditor>>,
   pos: number,
-  mode: SlashMenuState["mode"],
-  itemCount: number
+  mode: SlashMenuState["mode"]
 ) {
-  if (mode !== "commands") return placePopover(editor.view, pos, 320, 280);
-  return placePopover(editor.view, pos, 200, Math.max(itemCount, 1) * 48 + 8);
+  return placePopover(editor.view, pos, mode === "commands" ? 200 : 320);
 }
 
 const EntryCard = forwardRef<
@@ -217,20 +221,20 @@ const EntryCard = forwardRef<
       previous && previous.from === match.from && previous.mode !== "commands"
         ? previous.mode
         : "commands";
-    let position = { top: 8, left: 8 };
+    let position: PopoverPlace = { top: 8, left: 8, maxHeight: 240 };
     try {
-      const count =
-        mode === "commands" ? filterSlashCommands(match.query).length : 1;
-      position = slashPosition(current, match.to, mode, count);
+      position = slashPosition(current, match.to, mode);
     } catch {
-      position = { top: 8, left: 8 };
+      position = { top: 8, left: 8, maxHeight: 240 };
     }
     if (previous && previous.from === match.from && previous.mode !== "commands") {
       const next = { ...previous, to: match.to, ...position };
       if (
         previous.to === next.to &&
         previous.top === next.top &&
-        previous.left === next.left
+        previous.bottom === next.bottom &&
+        previous.left === next.left &&
+        previous.maxHeight === next.maxHeight
       ) {
         return;
       }
@@ -260,7 +264,9 @@ const EntryCard = forwardRef<
       previous.to === next.to &&
       previous.index === next.index &&
       previous.top === next.top &&
-      previous.left === next.left
+      previous.bottom === next.bottom &&
+      previous.left === next.left &&
+      previous.maxHeight === next.maxHeight
     ) {
       return;
     }
@@ -336,12 +342,29 @@ const EntryCard = forwardRef<
 
   useEffect(() => {
     if (!editor) return;
-    const refresh = () => revealCaret(editor.view);
-    editor.on("focus", refresh);
-    window.visualViewport?.addEventListener("resize", refresh);
+    let overlap = keyboardOverlap();
+    syncKeyboardOverlap();
+    const onFocus = () => revealCaret(editor.view);
+    const onResize = () => {
+      const next = keyboardOverlap();
+      syncKeyboardOverlap();
+      if (next > overlap + 40) revealCaret(editor.view);
+      overlap = next;
+    };
+    const pointerDown = () => setCaretPointerDown(true);
+    const pointerUp = () => setCaretPointerDown(false);
+    editor.on("focus", onFocus);
+    window.visualViewport?.addEventListener("resize", onResize);
+    window.addEventListener("touchstart", pointerDown, { passive: true });
+    window.addEventListener("touchend", pointerUp);
+    window.addEventListener("touchcancel", pointerUp);
     return () => {
-      editor.off("focus", refresh);
-      window.visualViewport?.removeEventListener("resize", refresh);
+      editor.off("focus", onFocus);
+      window.visualViewport?.removeEventListener("resize", onResize);
+      window.removeEventListener("touchstart", pointerDown);
+      window.removeEventListener("touchend", pointerUp);
+      window.removeEventListener("touchcancel", pointerUp);
+      setCaretPointerDown(false);
       document.documentElement.style.removeProperty("--keyboard-overlap");
     };
   }, [editor]);
@@ -384,10 +407,9 @@ const EntryCard = forwardRef<
     if (value === "prompt") {
       const current = slashMenuRef.current;
       const next: SlashMenuState = {
+        ...(current ?? { top: 8, left: 8, maxHeight: 240 }),
         ...match,
         index: 0,
-        top: current?.top ?? 8,
-        left: current?.left ?? 8,
         mode: "prompts",
         promptFilter: "",
       };
@@ -595,7 +617,9 @@ const EntryCard = forwardRef<
           query={slashMenu.query}
           index={slashMenu.index}
           top={slashMenu.top}
+          bottom={slashMenu.bottom}
           left={slashMenu.left}
+          maxHeight={slashMenu.maxHeight}
           onHover={(index) => {
             const next = slashMenuRef.current
               ? { ...slashMenuRef.current, index }
@@ -611,8 +635,13 @@ const EntryCard = forwardRef<
       )}
       {slashMenu && promptPicker && (
         <div
-          className="absolute z-40"
-          style={{ top: slashMenu.top, left: slashMenu.left }}
+          className="absolute z-40 overflow-y-auto"
+          style={{
+            top: slashMenu.top,
+            bottom: slashMenu.bottom,
+            left: slashMenu.left,
+            maxHeight: slashMenu.maxHeight,
+          }}
         >
           <PromptMenu
             label="Insert a writing prompt"
