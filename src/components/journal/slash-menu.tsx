@@ -125,7 +125,7 @@ export function SlashMenu({
       role="listbox"
       aria-label="Insert block"
       style={{ top, left }}
-      className="fixed z-40 min-w-44 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]"
+      className="absolute z-40 min-w-44 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]"
     >
       {items.length === 0 ? (
         <p className="px-2 py-1.5 text-sm text-[#8a847a]">No matches</p>
