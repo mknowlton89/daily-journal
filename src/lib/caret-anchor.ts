@@ -4,6 +4,19 @@ export const MOBILE_CHROME_INSET = 72;
 /** Room kept clear of the sticky day navigation. */
 export const STICKY_NAV_INSET = 52;
 
+export type PopoverPlace = {
+  left: number;
+  maxHeight: number;
+  top?: number;
+  bottom?: number;
+};
+
+let pointerDown = false;
+
+export function setCaretPointerDown(down: boolean) {
+  pointerDown = down;
+}
+
 export function anchorToCaret({
   caretTop,
   caretBottom,
@@ -11,8 +24,8 @@ export function anchorToCaret({
   rootTop,
   rootLeft,
   rootWidth,
+  rootHeight,
   menuWidth,
-  menuHeight,
   visibleTop,
   visibleBottom,
 }: {
@@ -22,27 +35,32 @@ export function anchorToCaret({
   rootTop: number;
   rootLeft: number;
   rootWidth: number;
+  rootHeight: number;
   menuWidth: number;
-  menuHeight: number;
   visibleTop: number;
   visibleBottom: number;
-}) {
+}): PopoverPlace {
   const gap = 8;
-  const roomBelow = visibleBottom - caretBottom;
-  const roomAbove = caretTop - visibleTop;
-  const above = roomBelow < menuHeight + gap && roomAbove > roomBelow;
-  let top = above
-    ? caretTop - rootTop - menuHeight - gap
-    : caretBottom - rootTop + gap;
-  const minTop = visibleTop - rootTop + gap;
-  const maxTop = visibleBottom - rootTop - menuHeight - gap;
-  if (maxTop > minTop) top = Math.min(Math.max(top, minTop), maxTop);
-
-  const left = Math.max(
-    gap,
-    Math.min(caretLeft - rootLeft, Math.max(gap, rootWidth - menuWidth - gap))
+  const roomBelow = visibleBottom - caretBottom - gap;
+  const roomAbove = caretTop - visibleTop - gap;
+  const above = roomBelow < 120 && roomAbove > roomBelow;
+  const left = Math.round(
+    Math.max(gap, Math.min(caretLeft - rootLeft, Math.max(gap, rootWidth - menuWidth - gap)))
   );
-  return { top: Math.round(top), left: Math.round(left) };
+
+  if (above) {
+    return {
+      left,
+      maxHeight: Math.max(48, Math.round(roomAbove)),
+      bottom: Math.round(rootHeight - (caretTop - rootTop) + gap),
+    };
+  }
+
+  return {
+    left,
+    maxHeight: Math.max(48, Math.round(roomBelow)),
+    top: Math.round(caretBottom - rootTop + gap),
+  };
 }
 
 export function caretScrollDelta(
@@ -87,11 +105,10 @@ function visibleBand() {
 export function placePopover(
   view: Pick<CaretView, "dom" | "coordsAtPos">,
   pos: number,
-  menuWidth: number,
-  menuHeight: number
-) {
+  menuWidth: number
+): PopoverPlace {
   const root = view.dom.closest(".journal-editor");
-  if (!(root instanceof HTMLElement)) return { top: 8, left: 8 };
+  if (!(root instanceof HTMLElement)) return { top: 8, left: 8, maxHeight: 240 };
   const rootRect = root.getBoundingClientRect();
   const coords = view.coordsAtPos(pos);
   const band = visibleBand();
@@ -102,17 +119,18 @@ export function placePopover(
     rootTop: rootRect.top,
     rootLeft: rootRect.left,
     rootWidth: rootRect.width,
+    rootHeight: rootRect.height,
     menuWidth,
-    menuHeight,
     visibleTop: band.top,
     visibleBottom: band.bottom,
   });
 }
 
 export function revealCaret(view: CaretView) {
+  if (pointerDown) return;
   syncKeyboardOverlap();
   requestAnimationFrame(() => {
-    if (view.isDestroyed || !view.hasFocus()) return;
+    if (pointerDown || view.isDestroyed || !view.hasFocus()) return;
     let coords: { top: number; bottom: number };
     try {
       coords = view.coordsAtPos(view.state.selection.head);

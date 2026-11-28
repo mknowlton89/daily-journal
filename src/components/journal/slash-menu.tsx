@@ -107,14 +107,18 @@ export function SlashMenu({
   query,
   index,
   top,
+  bottom,
   left,
+  maxHeight,
   onHover,
   onSelect,
 }: {
   query: string;
   index: number;
-  top: number;
+  top?: number;
+  bottom?: number;
   left: number;
+  maxHeight: number;
   onHover: (index: number) => void;
   onSelect: (value: string) => void;
 }) {
@@ -124,8 +128,8 @@ export function SlashMenu({
     <div
       role="listbox"
       aria-label="Insert block"
-      style={{ top, left }}
-      className="absolute z-40 min-w-44 rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]"
+      style={{ top, bottom, left, maxHeight }}
+      className="absolute z-40 min-w-44 overflow-y-auto rounded-md border border-black/10 bg-white p-1 shadow-md dark:border-white/10 dark:bg-[#2a2a28]"
     >
       {items.length === 0 ? (
         <p className="px-2 py-1.5 text-sm text-[#8a847a]">No matches</p>
